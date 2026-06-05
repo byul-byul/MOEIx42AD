@@ -12,7 +12,8 @@ from app.core.config import settings
 from app.core.database import AsyncSessionFactory
 from app.core.logger import get_logger
 from app.core.redis import get_session, save_session
-from app.models import ChannelType, Message, MessageRole
+from app.models import ChannelType, Message, MessageRole, Ticket, TicketStatus
+from sqlalchemy import select
 from app.schemas import AgentResponse, IncomingMessage
 
 logger = get_logger(__name__)
@@ -142,7 +143,7 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
     logger.info("Agent done | session=%s | intent=%s | ticket=%s | escalate=%s",
                 msg.session_id, intent, ticket_id, escalate)
 
-    # Persist both turns to DB for dashboard metrics and audit trail
+    # Persist both turns + update ticket escalation flag if needed
     try:
         channel_enum = ChannelType(msg.channel)
         async with AsyncSessionFactory() as db:
@@ -160,6 +161,12 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
                 role=MessageRole.agent,
                 text=reply_text,
             ))
+            if escalate and ticket_id:
+                result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
+                ticket = result.scalar_one_or_none()
+                if ticket:
+                    ticket.escalate = True
+                    ticket.status = TicketStatus.escalated
             await db.commit()
     except Exception as exc:
         logger.error("Failed to persist messages to DB: %s", exc)

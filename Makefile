@@ -46,6 +46,7 @@ ps:
 	docker compose ps
 	@echo "\n--- backend ---" && curl -s http://localhost:8000/health | python3 -m json.tool
 	@echo "\n--- channels ---" && curl -s http://localhost:8001/health | python3 -m json.tool
+	@echo "\n--- frontend ---" && curl -s -o /dev/null -w '{"frontend":"%{http_code}","url":"http://localhost:3000"}' http://localhost:3000 | python3 -m json.tool
 
 logs:
 	docker compose logs -f
