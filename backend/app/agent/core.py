@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
+from app.agent.sentiment import classify_sentiment
 from app.agent.tools import channel_ctx, create_ticket, get_ticket_status, session_ctx
 from app.core.config import settings
 from app.core.database import AsyncSessionFactory
@@ -140,8 +141,9 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
     )
 
     intent = "support_request" if ticket_id else "general_inquiry"
-    logger.info("Agent done | session=%s | intent=%s | ticket=%s | escalate=%s",
-                msg.session_id, intent, ticket_id, escalate)
+    sentiment = await classify_sentiment(msg.text)
+    logger.info("Agent done | session=%s | intent=%s | ticket=%s | escalate=%s | sentiment=%s",
+                msg.session_id, intent, ticket_id, escalate, sentiment)
 
     # Persist both turns + update ticket escalation flag if needed
     try:
@@ -153,6 +155,7 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
                 channel=channel_enum,
                 role=MessageRole.user,
                 text=msg.text,
+                sentiment=sentiment,
             ))
             db.add(Message(
                 ticket_id=ticket_id,
@@ -175,7 +178,7 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
         session_id=msg.session_id,
         text=reply_text,
         intent=intent,
-        sentiment="neutral",
+        sentiment=sentiment,
         ticket_id=ticket_id,
         escalate=escalate,
     )

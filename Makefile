@@ -1,5 +1,5 @@
 # /Makefile
-.PHONY: build up down clean fclean bup ngrok telegram-setup ps logs logs-backend logs-channels logs-frontend logs-db logs-redis
+.PHONY: build up down clean fclean bup ngrok telegram-setup ps logs logs-backend logs-channels logs-frontend logs-db logs-redis test seed
 
 build:
 	docker compose build
@@ -65,3 +65,13 @@ logs-db:
 
 logs-redis:
 	docker compose logs -f redis
+
+test:
+	docker compose exec \
+		-e TEST_BACKEND_URL=http://backend:8000 \
+		-e TEST_CHANNELS_URL=http://channels:8001 \
+		-e TEST_FRONTEND_URL=http://frontend:3000 \
+		backend python -m pytest /tests/ -v
+
+seed:
+	python3 scripts/seed_demo.py
