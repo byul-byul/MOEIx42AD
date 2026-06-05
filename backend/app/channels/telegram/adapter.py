@@ -1,4 +1,4 @@
-# /backend/app/channels/telegram.py
+# /backend/app/channels/telegram/adapter.py
 import httpx
 from fastapi import APIRouter, Request, Response
 from telegram import Bot, Update

@@ -1,7 +1,7 @@
 # /backend/app/channels_main.py
 from fastapi import FastAPI
 
-from app.channels.telegram import router as telegram_router
+from app.channels.telegram.adapter import router as telegram_router
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
