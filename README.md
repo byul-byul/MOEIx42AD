@@ -9,19 +9,20 @@ Built for the **MOEI AD42 Agentic AI Hackathon** — 48 hours, June 9–11 2026.
 
 A unified AI agent that handles customer inquiries across multiple channels with shared context:
 
-| Channel | Status | Port |
-|---------|--------|------|
-| Telegram | ✅ Live | — (webhook) |
-| Web Chat | ✅ Live | 3000 |
-| Voice | 🔄 Phase 4 | — |
-| WhatsApp | ⬜ Phase 5 | — |
+| Channel | Status |
+|---------|--------|
+| Telegram | ✅ Live |
+| Web Chat | ✅ Live |
+| Voice (browser mic) | ✅ Live |
+| WhatsApp | ⬜ Phase 5 |
 
 - Responds in **English and Arabic** (auto-detected)
 - Creates and tracks **support tickets** in Postgres
 - Maintains **session memory** in Redis (1h TTL, last 20 messages)
-- Persists all **messages to DB** for audit and analytics
-- Escalates **safety-critical issues** automatically
-- Real-time **leadership dashboard** with live metrics
+- Classifies **sentiment** per message (positive / neutral / negative) via GPT-4o-mini
+- Escalates **safety-critical issues** automatically (gas leaks, electrical hazards)
+- Real-time **leadership dashboard** with live metrics, sentiment chart, ticket table
+- **AI co-pilot panel** — live feed of conversations with AI-suggested replies for human agents
 
 ---
 
@@ -39,6 +40,9 @@ make bup
 # Web Chat:   http://localhost:3000
 # Dashboard:  http://localhost:3000/dashboard
 # API Docs:   http://localhost:8000/docs
+
+# 4. Seed realistic demo data (optional but recommended)
+make seed
 ```
 
 ---
@@ -57,6 +61,7 @@ make bup
 │  WebSocket  │     │  LangGraph + GPT-4o agent            │
 └─────────────┘     │  POST /api/message                   │
                     │  GET  /api/metrics                   │
+                    │  GET  /api/copilot                   │
                     │  GET  /api/session/{id}              │
                     │  WS   /ws/{session_id}               │
                     └──────────┬──────────────┬────────────┘
@@ -103,7 +108,9 @@ make bup
 | `make logs-frontend` | Follow frontend logs only |
 | `make ngrok` | Start ngrok tunnel, write URL to .env |
 | `make telegram-setup` | Register Telegram webhook (once after deploy) |
-| `make clean` | Remove containers + Python cache |
+| `make test` | Run integration tests (requires services up) |
+| `make seed` | Seed realistic demo conversations into DB |
+| `make clean` | Remove caches and orphaned containers |
 | `make fclean` | clean + remove volumes (deletes all data) |
 
 ---
@@ -122,7 +129,7 @@ Required before first run: `OPENAI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `POSTGRES_PAS
 | [`docs/USER_DOC.md`](docs/USER_DOC.md) | End-user and operator guide |
 | [`docs/DEV_DOC.md`](docs/DEV_DOC.md) | Developer setup and architecture |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phases, tech debt, future work |
-| [`CLAUDE.md`](CLAUDE.md) | AI assistant context (coding conventions, demo script) |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | Open questions and architecture decisions |
 
 ---
 
@@ -130,6 +137,8 @@ Required before first run: `OPENAI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `POSTGRES_PAS
 
 1. Customer writes in Telegram in Arabic → agent replies in Arabic
 2. Same customer opens web chat → context already there (shared Redis session)
-3. Customer calls → agent hears and responds with voice *(Phase 4)*
-4. Human agent sees AI co-pilot suggestions in real time *(Phase 6)*
-5. Leadership views dashboard — live metrics + ticket trends
+3. Customer clicks 🎤 mic in web chat → agent hears question, replies with audio
+4. Human agent sees AI co-pilot suggestions in dashboard in real time
+5. Leadership views dashboard — live metrics, sentiment trend, ticket table
+
+Run `make seed` before the demo to populate realistic multi-channel data.

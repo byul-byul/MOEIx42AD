@@ -26,12 +26,14 @@
 - Operations dashboard: live metrics, bar + pie charts (Recharts), tickets table
 - CORS, VITE env vars for backend URLs
 
-### Phase 4 🔄 — Voice channel
-- WebSocket or HTTP endpoint accepting audio upload
-- STT: OpenAI Whisper (`requirements-ml.txt`)
-- Agent: same `run_agent()` — no changes
-- TTS: ElevenLabs (primary) or gTTS (fallback)
-- Adapter: `backend/app/channels/voice/adapter.py`
+### Phase 4 ✅ — Voice channel
+- POST `/voice/message` on channels service (port 8001)
+- STT: OpenAI Whisper API (`openai.audio.transcriptions`)
+- Agent: same `run_agent()` — no changes (channel-agnostic)
+- TTS: OpenAI TTS API (model=tts-1, voice configurable via `TTS_VOICE` env)
+- Browser mic button (🎤/⏹) in web chat using MediaRecorder API
+- Audio response played in-browser from base64
+- Messages stored in DB as `channel="voice"`
 
 ### Phase 5 ⬜ — WhatsApp channel
 - Meta Cloud API webhook
@@ -39,25 +41,28 @@
 - Adapter: `backend/app/channels/whatsapp/adapter.py`
 - Verify token handshake (GET + POST)
 
-### Phase 6 ⬜ — Polish: sentiment, co-pilot, demo prep
-- Sentiment analysis: replace `"neutral"` placeholder with real model
-  - Arabic: `CAMeL-Lab/bert-base-arabic-camelbert-mix-sentiment`
-  - English: `distilbert-base-uncased-finetuned-sst-2-english`
-- AI co-pilot panel in dashboard (suggested replies for human agents)
-- Synthetic demo data seeding script
-- Demo video recording
-- Final health check and load test
+### Phase 6 ✅ — Polish: sentiment, co-pilot, tests, demo prep
+- **Sentiment analysis:** GPT-4o-mini classifier (`positive` / `neutral` / `negative`)
+  - `backend/app/agent/sentiment.py`
+  - Stored in `Message.sentiment` column
+  - Displayed as pie chart in dashboard
+- **AI co-pilot panel:** `GET /api/copilot` — live feed of recent conversations + AI-suggested replies for human agents
+- **Sentiment chart:** third chart in dashboard (3-column responsive grid)
+- **Integration tests:** `tests/test_health.py` (5 tests), `tests/test_agent.py` (5 tests)
+  - `make test` — runs via `docker compose exec` with correct container URLs
+- **Demo seed script:** `scripts/seed_demo.py` — 8 realistic conversations, EN + AR, multiple channels
+  - `make seed`
 
 ---
 
-## Planned test coverage (before Phase 6)
+## Test coverage
 
-| File | What to test |
-|------|-------------|
-| `tests/test_health.py` | `/health` returns `ok` for all three services |
-| `tests/test_agent.py` | `run_agent()` returns valid response; `create_ticket` tool creates DB row |
-| `tests/test_channels.py` | Telegram adapter correctly parses Update → IncomingMessage |
-| `tests/test_metrics.py` | `/api/metrics` returns correct counts after seeding data |
+| File | Tests |
+|------|-------|
+| `tests/test_health.py` | backend health, channels health, frontend up, metrics shape, copilot shape |
+| `tests/test_agent.py` | agent response, sentiment field, Arabic response, ticket creation, session history |
+
+Run with: `make test`
 
 ---
 
@@ -73,35 +78,28 @@
 ### 🟡 Medium — fix before wider rollout
 
 #### Cross-channel identity linking
-- Same person on Telegram (`telegram_123`) and web chat (`webchat_abc`) has separate session histories and separate DB rows with no link between them
+- Same person on Telegram (`telegram_123`) and web chat (`webchat_abc`) has separate session histories with no link between them
 - **Demo workaround:** Presenter manually enters the Telegram session ID in the web chat input
-- **Fix:** `identities` table linking `(channel, channel_user_id)` pairs to a single internal `user_id`; update `run_agent()` to resolve identities on session start
+- **Fix:** `identities` table linking `(channel, channel_user_id)` pairs to a single internal `user_id`
 - **Effort:** ~3h
 
 #### Chat history fallback to DB missing
 - `GET /api/session/{id}` reads from Redis only
-- If Redis is restarted or TTL expires, history is lost — even though messages exist in the `messages` table
+- If Redis restarts or TTL expires, history is lost — even though messages exist in the `messages` table
 - **Fix:** Fall back to `SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp` when Redis key is missing
 - **Effort:** ~1h
 
 #### Alembic migrations not configured
 - Schema changes require `make fclean && make bup` (drops all data)
-- **Fix:** Initialize Alembic (`alembic init`), write initial migration from current models
+- **Fix:** Initialize Alembic, write initial migration from current models
 - **Effort:** ~1h
 
 ### 🟢 Low — nice to have
 
 #### Users table not populated for general inquiries
 - `users` rows only created when `create_ticket` tool is called
-- Customers who only chat without reporting an issue are invisible in the DB
 - **Fix:** Upsert a user row on every first message in a session
 - **Effort:** ~30min
-
-#### Sentiment analysis is a placeholder
-- `AgentResponse.sentiment` always returns `"neutral"`
-- `Message.sentiment` column always null
-- **Fix:** Add sentiment inference in Phase 6 (see above)
-- **Effort:** ~2h (model loading + inference integration)
 
 #### Redis has no persistence
 - Default Redis config is in-memory only; restart loses all active sessions
@@ -131,7 +129,7 @@ The stack is designed to deploy on **Railway** or **Render**:
 
 For the hackathon presentation:
 
-1. **Arabic inquiry via WhatsApp** *(Phase 5)*
+1. **Arabic inquiry via Telegram**
    - Customer: "أريد الإبلاغ عن انقطاع في الكهرباء"
    - Agent replies in Arabic, creates a ticket
 
@@ -139,12 +137,12 @@ For the hackathon presentation:
    - Show same session_id in both channels
    - Agent remembers the previous conversation
 
-3. **Customer calls — voice response** *(Phase 4)*
-   - Agent hears the question, responds with synthesized voice
+3. **Customer uses voice — browser mic**
+   - Click 🎤, speak, agent replies in audio
 
-4. **Human agent co-pilot** *(Phase 6)*
-   - Dashboard shows the live conversation
-   - AI suggests response options for the human agent
+4. **Human agent co-pilot**
+   - Dashboard co-pilot panel shows the live conversation
+   - AI-suggested replies visible in real time
 
 5. **Leadership view**
-   - Dashboard: active sessions, ticket counts, escalated cases, channel breakdown
+   - Dashboard: active sessions, ticket counts, escalated cases, sentiment breakdown, channel breakdown

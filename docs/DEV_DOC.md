@@ -20,8 +20,8 @@ This guide covers environment setup, architecture details, and workflows for dev
 
 ```bash
 # 1. Clone the repository
-git clone <repo-url>
-cd moei
+git clone https://github.com/byul-byul/MOEIx42AD.git
+cd MOEIx42AD
 
 # 2. Create environment file
 cp .env.example .env
@@ -54,50 +54,47 @@ make bup
 ├── docker-compose.yml          ← all 5 services
 ├── Makefile                    ← all dev commands
 ├── .env.example                ← env template (commit this)
-├── .env                        ← secrets (never commit)
-├── CLAUDE.md                   ← AI assistant context
-├── docs/                       ← documentation
+├── .env                        ← secrets (never commit, gitignored)
+├── CLAUDE.md                   ← AI assistant context (gitignored — local only)
+├── docs/
 │   ├── USER_DOC.md
 │   ├── DEV_DOC.md
-│   └── ROADMAP.md
-├── backend/
-│   ├── Dockerfile
-│   ├── requirements.txt        ← core dependencies
-│   ├── requirements-ml.txt     ← Phase 4+ (Whisper, torch)
-│   └── app/
-│       ├── main.py             ← FastAPI app (port 8000)
-│       ├── channels_main.py    ← Channels app (port 8001)
-│       ├── models.py           ← SQLAlchemy ORM
-│       ├── schemas.py          ← Pydantic schemas
-│       ├── core/
-│       │   ├── config.py       ← pydantic-settings
-│       │   ├── logger.py       ← get_logger(__name__)
-│       │   ├── database.py     ← async engine, get_db()
-│       │   └── redis.py        ← session read/write
-│       ├── agent/
-│       │   ├── core.py         ← LangGraph agent, run_agent()
-│       │   └── tools.py        ← create_ticket, get_ticket_status
-│       ├── api/
-│       │   └── message.py      ← POST /api/message, GET /api/session/{id}
-│       ├── channels/
-│       │   ├── base.py         ← abstract BaseChannel
-│       │   ├── telegram/adapter.py   ← ✅ implemented
-│       │   ├── webchat/adapter.py    ← ✅ implemented (WebSocket)
-│       │   ├── whatsapp/adapter.py   ← ⬜ Phase 5 stub
-│       │   └── voice/adapter.py      ← 🔄 Phase 4 stub
-│       └── dashboard/
-│           └── metrics.py      ← GET /api/metrics
-└── frontend/
+│   ├── ROADMAP.md
+│   └── DECISIONS.md            ← open questions and architecture ADRs
+├── tests/
+│   ├── test_health.py          ← 5 integration health tests
+│   └── test_agent.py           ← 5 agent integration tests
+├── scripts/
+│   └── seed_demo.py            ← seeds realistic demo data
+└── backend/
     ├── Dockerfile
-    ├── package.json
-    ├── vite.config.js
-    └── src/
-        ├── App.jsx             ← React Router (/ /chat /dashboard)
-        ├── index.css           ← all styles (CSS variables, MOEI branding)
-        ├── main.jsx
-        └── components/
-            ├── Chat.jsx        ← WebSocket chat
-            └── Dashboard.jsx   ← Recharts metrics
+    ├── requirements.txt        ← core dependencies
+    ├── requirements-ml.txt     ← heavy ML deps (torch, whisper) — not used
+    └── app/
+        ├── main.py             ← FastAPI app (port 8000)
+        ├── channels_main.py    ← Channels app (port 8001)
+        ├── models.py           ← SQLAlchemy ORM
+        ├── schemas.py          ← Pydantic schemas
+        ├── core/
+        │   ├── config.py       ← pydantic-settings
+        │   ├── logger.py       ← get_logger(__name__)
+        │   ├── database.py     ← async engine, get_db()
+        │   └── redis.py        ← session read/write
+        ├── agent/
+        │   ├── core.py         ← LangGraph agent, run_agent()
+        │   ├── memory.py       ← Redis session helpers
+        │   ├── sentiment.py    ← GPT-4o-mini sentiment classifier
+        │   └── tools.py        ← create_ticket, get_ticket_status
+        ├── api/
+        │   └── message.py      ← POST /api/message, GET /api/session/{id}
+        ├── channels/
+        │   ├── base.py                  ← abstract BaseChannel
+        │   ├── telegram/adapter.py      ← ✅ implemented
+        │   ├── webchat/adapter.py       ← ✅ implemented (WebSocket)
+        │   ├── voice/adapter.py         ← ✅ implemented (Whisper STT + OpenAI TTS)
+        │   └── whatsapp/adapter.py      ← ⬜ Phase 5 stub
+        └── dashboard/
+            └── metrics.py      ← GET /api/metrics, GET /api/copilot
 ```
 
 ---
@@ -119,7 +116,7 @@ Backend and channels share the same Docker image (`./backend`). The difference i
 ## Message flow
 
 ```
-User (Telegram/WebChat)
+User (Telegram / WebChat / Voice)
     │
     ▼
 Channel Adapter (channels service, port 8001)
@@ -132,15 +129,18 @@ Backend (port 8000) — run_agent()
     ├─ Reconstruct LangChain messages
     ├─ LangGraph: LLM → [tools?] → LLM
     │      Tools: create_ticket(), get_ticket_status()
+    ├─ classify_sentiment(user_text) → GPT-4o-mini
     ├─ Save messages to Redis (last 20, TTL 1h)
-    ├─ Save messages to Postgres (permanent)
+    ├─ Save messages to Postgres (permanent, with sentiment)
     └─ Return AgentResponse
     │
 Channel Adapter
     │  send_response() → user sees reply
 ```
 
-**WebChat** connects directly via WebSocket (`/ws/{session_id}`) and calls `run_agent()` in-process — no HTTP hop to the channels service.
+**WebChat** connects directly via WebSocket (`/ws/{session_id}`) and calls `run_agent()` in-process.
+
+**Voice** flow: browser mic → WebM blob → `POST /voice/message` → Whisper STT → `run_agent()` → OpenAI TTS → MP3 base64 → browser plays audio.
 
 ---
 
@@ -172,9 +172,9 @@ Tables: `users`, `tickets`, `messages`
 docker exec -it moei-db-1 psql -U moei -d moei
 
 # Useful queries
-\dt                              -- list tables
-SELECT * FROM messages LIMIT 10; -- recent messages
-SELECT * FROM tickets;           -- all tickets
+\dt                                                  -- list tables
+SELECT session_id, channel, role, sentiment, LEFT(text, 60) FROM messages ORDER BY timestamp DESC LIMIT 20;
+SELECT * FROM tickets ORDER BY created_at DESC;
 ```
 
 **Volume:** `pg_data` (Docker named volume). Survives `make down`. Destroyed by `make fclean`.
@@ -192,12 +192,15 @@ SELECT * FROM tickets;           -- all tickets
 | `POSTGRES_PASSWORD` | `changeme` | ✅ | DB password |
 | `REDIS_HOST` | `redis` | — | Redis hostname |
 | `REDIS_PORT` | `6379` | — | Redis port |
-| `OPENAI_API_KEY` | — | ✅ | GPT-4o key |
+| `OPENAI_API_KEY` | — | ✅ | GPT-4o + GPT-4o-mini + Whisper + TTS |
 | `TELEGRAM_BOT_TOKEN` | — | ✅ | From @BotFather |
 | `TELEGRAM_WEBHOOK_URL` | — | auto | Set by `make ngrok` |
 | `BACKEND_URL` | `http://backend:8000` | — | Inter-service URL (channels → backend) |
-| `ELEVENLABS_API_KEY` | — | Phase 4 | TTS for voice channel |
+| `TTS_VOICE` | `nova` | — | OpenAI TTS voice (alloy/echo/fable/onyx/nova/shimmer) |
 | `WHATSAPP_TOKEN` | — | Phase 5 | Meta Cloud API token |
+| `WHATSAPP_PHONE_NUMBER_ID` | — | Phase 5 | Meta phone number ID |
+| `WHATSAPP_VERIFY_TOKEN` | — | Phase 5 | Webhook verify token |
+| `ELEVENLABS_API_KEY` | — | unused | Kept for future TTS upgrade |
 | `APP_ENV` | `development` | — | Controls SQLAlchemy echo |
 | `LOG_LEVEL` | `INFO` | — | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
@@ -254,24 +257,42 @@ Interactive docs available at **http://localhost:8000/docs** (Swagger UI).
 | `/health` | GET | channels | `{channels}` status |
 | `/api/message` | POST | backend | Run agent: IncomingMessage → AgentResponse |
 | `/api/session/{id}` | GET | backend | Fetch Redis session history |
-| `/api/metrics` | GET | backend | Dashboard metrics |
+| `/api/metrics` | GET | backend | Dashboard metrics (sessions, tickets, sentiment, channels) |
+| `/api/copilot` | GET | backend | Recent conversations + AI-suggested replies for human agents |
 | `/ws/{session_id}` | WS | backend | WebChat WebSocket |
 | `/telegram/webhook` | POST | channels | Telegram update receiver |
 | `/telegram/setup` | POST | channels | Register webhook with Telegram |
+| `/voice/message` | POST | channels | Voice: audio file → STT → agent → TTS audio response |
 
 ---
 
 ## Running tests
 
 ```bash
-# Inside the backend container
-docker exec moei-backend-1 pytest tests/ -v
+# Run all tests (from project root)
+make test
 
-# Single test file
-docker exec moei-backend-1 pytest tests/test_agent.py -v
+# Equivalent manual command
+docker compose exec \
+  -e TEST_BACKEND_URL=http://backend:8000 \
+  -e TEST_CHANNELS_URL=http://channels:8001 \
+  -e TEST_FRONTEND_URL=http://frontend:3000 \
+  backend python -m pytest /tests/ -v
 ```
 
-Test files live in `tests/`. See [`docs/ROADMAP.md`](ROADMAP.md) for planned test coverage.
+Tests live in `tests/` at project root, mounted into the backend container at `/tests`.  
+Tests call real running services — requires `make up` first.
+
+---
+
+## Seeding demo data
+
+```bash
+make seed
+```
+
+Runs `scripts/seed_demo.py` — sends 8 realistic conversations (English + Arabic, webchat + telegram) through the live backend. Uses real GPT-4o. Costs ~$0.10.  
+Run once before the demo to populate the dashboard with meaningful data.
 
 ---
 
@@ -310,3 +331,6 @@ docker exec moei-redis-1 redis-cli ping  # should return PONG
 ```bash
 docker exec moei-db-1 pg_isready -U moei -d moei
 ```
+
+**Voice: no audio in browser:**  
+Browser requires HTTPS or localhost for microphone access. Works on `localhost:3000`.
