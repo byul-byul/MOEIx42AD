@@ -21,6 +21,10 @@ class Settings(BaseSettings):
 
     # Telegram
     telegram_bot_token: str = ""
+    telegram_webhook_url: str = ""  # e.g. https://<ngrok>.ngrok.io/telegram/webhook
+
+    # Inter-service
+    backend_url: str = "http://backend:8000"
 
     # WhatsApp
     whatsapp_token: str = ""

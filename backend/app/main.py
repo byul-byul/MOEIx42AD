@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.message import router as message_router
 from app.core.database import Base, check_db, engine
 from app.core.logger import get_logger
 from app.core.redis import check_redis
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="MOEI Agent Backend", version="0.1.0", lifespan=lifespan)
+app.include_router(message_router)
 
 
 @app.get("/health", response_model=HealthResponse, tags=["ops"])
