@@ -1,5 +1,5 @@
 # /Makefile
-.PHONY: build up down clean fclean bup ngrok telegram-setup ps logs logs-backend logs-channels logs-db logs-redis
+.PHONY: build up down clean fclean bup ngrok telegram-setup ps logs logs-backend logs-channels logs-frontend logs-db logs-redis
 
 build:
 	docker compose build
@@ -55,6 +55,9 @@ logs-backend:
 
 logs-channels:
 	docker compose logs -f channels
+
+logs-frontend:
+	docker compose logs -f frontend
 
 logs-db:
 	docker compose logs -f db
