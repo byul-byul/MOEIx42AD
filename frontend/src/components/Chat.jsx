@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
-const BACKEND_WS  = import.meta.env.VITE_BACKEND_WS_URL  || 'ws://localhost:8000'
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL     || 'http://localhost:8000'
+const BACKEND_WS   = import.meta.env.VITE_BACKEND_WS_URL  || 'ws://localhost:8000'
+const BACKEND_URL  = import.meta.env.VITE_BACKEND_URL     || 'http://localhost:8000'
+const CHANNELS_URL = import.meta.env.VITE_CHANNELS_URL    || 'http://localhost:8001'
 
 function getSessionId() {
   let id = localStorage.getItem('moei_session_id')
@@ -19,13 +20,17 @@ function formatTime(date) {
 export default function Chat() {
   const WELCOME = { role: 'agent', text: 'Hello! I\'m the MOEI AI Assistant. How can I help you today?\nمرحباً! أنا مساعد وزارة الطاقة والبنية التحتية. كيف يمكنني مساعدتك؟', time: new Date() }
 
-  const [messages, setMessages] = useState([WELCOME])
-  const [input, setInput] = useState('')
-  const [status, setStatus] = useState('connecting')
-  const [isTyping, setIsTyping] = useState(false)
-  const wsRef = useRef(null)
-  const bottomRef = useRef(null)
-  const sessionId = useRef(getSessionId())
+  const [messages, setMessages]   = useState([WELCOME])
+  const [input, setInput]         = useState('')
+  const [status, setStatus]       = useState('connecting')
+  const [isTyping, setIsTyping]   = useState(false)
+  const [recording, setRecording] = useState(false)
+
+  const wsRef            = useRef(null)
+  const bottomRef        = useRef(null)
+  const sessionId        = useRef(getSessionId())
+  const mediaRecorderRef = useRef(null)
+  const chunksRef        = useRef([])
 
   useEffect(() => {
     loadHistory()
@@ -33,13 +38,16 @@ export default function Chat() {
     return () => wsRef.current?.close()
   }, [])
 
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isTyping])
+
   async function loadHistory() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/session/${sessionId.current}`)
       const history = await res.json()
       if (!history.length) return
-      const restored = history.map(m => ({ role: m.role, text: m.text, time: new Date() }))
-      setMessages([WELCOME, ...restored])
+      setMessages([WELCOME, ...history.map(m => ({ role: m.role, text: m.text, time: new Date() }))])
     } catch {}
   }
 
@@ -53,40 +61,23 @@ export default function Chat() {
     connect()
   }
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, isTyping])
-
   function connect() {
     setStatus('connecting')
     const ws = new WebSocket(`${BACKEND_WS}/ws/${sessionId.current}`)
-
-    ws.onopen = () => setStatus('connected')
-    ws.onclose = () => {
-      setStatus('disconnected')
-      setTimeout(connect, 3000)
-    }
+    ws.onopen  = () => setStatus('connected')
+    ws.onclose = () => { setStatus('disconnected'); setTimeout(connect, 3000) }
     ws.onerror = () => setStatus('disconnected')
-
     ws.onmessage = (e) => {
       const data = JSON.parse(e.data)
       setIsTyping(false)
-      setMessages(prev => [...prev, {
-        role: 'agent',
-        text: data.text,
-        time: new Date(),
-        ticketId: data.ticket_id,
-        escalate: data.escalate,
-      }])
+      setMessages(prev => [...prev, { role: 'agent', text: data.text, time: new Date(), ticketId: data.ticket_id }])
     }
-
     wsRef.current = ws
   }
 
   function send() {
     const text = input.trim()
     if (!text || status !== 'connected') return
-
     setMessages(prev => [...prev, { role: 'user', text, time: new Date() }])
     setInput('')
     setIsTyping(true)
@@ -94,11 +85,67 @@ export default function Chat() {
   }
 
   function onKeyDown(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      send()
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+  }
+
+  // ── Voice ──────────────────────────────────────────────────────────────────
+
+  async function toggleRecording() {
+    if (recording) {
+      mediaRecorderRef.current?.stop()
+      setRecording(false)
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const mr = new MediaRecorder(stream)
+        chunksRef.current = []
+        mr.ondataavailable = e => chunksRef.current.push(e.data)
+        mr.onstop = () => {
+          stream.getTracks().forEach(t => t.stop())
+          sendVoiceMessage(new Blob(chunksRef.current, { type: 'audio/webm' }))
+        }
+        mr.start()
+        mediaRecorderRef.current = mr
+        setRecording(true)
+      } catch {
+        alert('Microphone access denied. Please allow microphone access in your browser.')
+      }
     }
   }
+
+  async function sendVoiceMessage(blob) {
+    setIsTyping(true)
+    const form = new FormData()
+    form.append('audio', blob, 'recording.webm')
+    form.append('session_id', sessionId.current)
+
+    try {
+      const res  = await fetch(`${CHANNELS_URL}/voice/message`, { method: 'POST', body: form })
+      const data = await res.json()
+
+      if (data.error) {
+        setIsTyping(false)
+        setMessages(prev => [...prev, { role: 'agent', text: `⚠️ Voice error: ${data.error}`, time: new Date() }])
+        return
+      }
+
+      setMessages(prev => [...prev,
+        { role: 'user',  text: `🎤 ${data.transcript}`, time: new Date() },
+        { role: 'agent', text: data.agent.text, time: new Date(), ticketId: data.agent.ticket_id },
+      ])
+
+      if (data.audio_base64) {
+        const audio = new Audio(`data:audio/mpeg;base64,${data.audio_base64}`)
+        audio.play().catch(() => {})
+      }
+    } catch (err) {
+      setMessages(prev => [...prev, { role: 'agent', text: '⚠️ Voice processing failed. Please try again.', time: new Date() }])
+    } finally {
+      setIsTyping(false)
+    }
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="chat-layout">
@@ -122,15 +169,13 @@ export default function Chat() {
         {messages.map((m, i) => (
           <div key={i} className={`message ${m.role}`}>
             <div className="bubble">{m.text}</div>
-            {m.ticketId && (
-              <span className="ticket-badge">Ticket #{m.ticketId} created</span>
-            )}
+            {m.ticketId && <span className="ticket-badge">Ticket #{m.ticketId} created</span>}
             <span className="meta">{formatTime(m.time)}</span>
           </div>
         ))}
         {isTyping && (
           <div className="message agent typing">
-            <div className="bubble">Assistant is typing…</div>
+            <div className="bubble">{recording ? 'Processing voice…' : 'Assistant is typing…'}</div>
           </div>
         )}
         <div ref={bottomRef} />
@@ -146,6 +191,21 @@ export default function Chat() {
           onKeyDown={onKeyDown}
           disabled={status !== 'connected'}
         />
+        <button
+          onClick={toggleRecording}
+          title={recording ? 'Stop recording' : 'Record voice message'}
+          style={{
+            padding: '10px 14px',
+            borderRadius: 8,
+            border: recording ? '2px solid #ef4444' : '1px solid #e5e7eb',
+            background: recording ? '#fee2e2' : 'white',
+            cursor: 'pointer',
+            fontSize: 18,
+            transition: 'all 0.2s',
+          }}
+        >
+          {recording ? '⏹' : '🎤'}
+        </button>
         <button
           className="send-btn"
           onClick={send}

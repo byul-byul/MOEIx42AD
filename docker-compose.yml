@@ -63,6 +63,7 @@ services:
     environment:
       - VITE_BACKEND_URL=http://localhost:8000
       - VITE_BACKEND_WS_URL=ws://localhost:8000
+      - VITE_CHANNELS_URL=http://localhost:8001
     volumes:
       - ./frontend:/app
       - /app/node_modules
