@@ -32,12 +32,11 @@ async def get_metrics(db: AsyncSession = Depends(get_db)) -> dict:
     total_result = await db.execute(select(func.count()).select_from(Ticket))
     total_tickets = total_result.scalar() or 0
 
-    # Messages by channel
-    from sqlalchemy import text as sa_text
+    # Messages by channel — use channel column on Message directly
     channel_result = await db.execute(
-        select(Ticket.channel, func.count(Message.id))
-        .join(Message, Message.ticket_id == Ticket.id, isouter=True)
-        .group_by(Ticket.channel)
+        select(Message.channel, func.count(Message.id))
+        .where(Message.role == "user")
+        .group_by(Message.channel)
     )
     messages_by_channel = {row[0].value: row[1] for row in channel_result}
 

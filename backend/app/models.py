@@ -60,10 +60,13 @@ class Message(Base):
     __tablename__ = "messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id"), nullable=False)
+    # nullable — messages exist independently of tickets for general inquiries
+    ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
+    session_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    channel: Mapped[ChannelType] = mapped_column(SAEnum(ChannelType), nullable=False)
     role: Mapped[MessageRole] = mapped_column(SAEnum(MessageRole), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     sentiment: Mapped[str | None] = mapped_column(String(50), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    ticket: Mapped["Ticket"] = relationship("Ticket", back_populates="messages")
+    ticket: Mapped["Ticket | None"] = relationship("Ticket", back_populates="messages")

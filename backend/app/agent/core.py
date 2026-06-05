@@ -9,8 +9,10 @@ from langgraph.graph import END, StateGraph
 
 from app.agent.tools import channel_ctx, create_ticket, get_ticket_status, session_ctx
 from app.core.config import settings
+from app.core.database import AsyncSessionFactory
 from app.core.logger import get_logger
 from app.core.redis import get_session, save_session
+from app.models import ChannelType, Message, MessageRole
 from app.schemas import AgentResponse, IncomingMessage
 
 logger = get_logger(__name__)
@@ -139,6 +141,28 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
     intent = "support_request" if ticket_id else "general_inquiry"
     logger.info("Agent done | session=%s | intent=%s | ticket=%s | escalate=%s",
                 msg.session_id, intent, ticket_id, escalate)
+
+    # Persist both turns to DB for dashboard metrics and audit trail
+    try:
+        channel_enum = ChannelType(msg.channel)
+        async with AsyncSessionFactory() as db:
+            db.add(Message(
+                ticket_id=ticket_id,
+                session_id=msg.session_id,
+                channel=channel_enum,
+                role=MessageRole.user,
+                text=msg.text,
+            ))
+            db.add(Message(
+                ticket_id=ticket_id,
+                session_id=msg.session_id,
+                channel=channel_enum,
+                role=MessageRole.agent,
+                text=reply_text,
+            ))
+            await db.commit()
+    except Exception as exc:
+        logger.error("Failed to persist messages to DB: %s", exc)
 
     return AgentResponse(
         session_id=msg.session_id,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
-const BACKEND_WS = import.meta.env.VITE_BACKEND_WS_URL || 'ws://localhost:8000'
+const BACKEND_WS  = import.meta.env.VITE_BACKEND_WS_URL  || 'ws://localhost:8000'
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL     || 'http://localhost:8000'
 
 function getSessionId() {
   let id = localStorage.getItem('moei_session_id')
@@ -16,9 +17,9 @@ function formatTime(date) {
 }
 
 export default function Chat() {
-  const [messages, setMessages] = useState([
-    { role: 'agent', text: 'Hello! I\'m the MOEI AI Assistant. How can I help you today?\nمرحباً! أنا مساعد وزارة الطاقة والبنية التحتية. كيف يمكنني مساعدتك؟', time: new Date() }
-  ])
+  const WELCOME = { role: 'agent', text: 'Hello! I\'m the MOEI AI Assistant. How can I help you today?\nمرحباً! أنا مساعد وزارة الطاقة والبنية التحتية. كيف يمكنني مساعدتك؟', time: new Date() }
+
+  const [messages, setMessages] = useState([WELCOME])
   const [input, setInput] = useState('')
   const [status, setStatus] = useState('connecting')
   const [isTyping, setIsTyping] = useState(false)
@@ -27,9 +28,30 @@ export default function Chat() {
   const sessionId = useRef(getSessionId())
 
   useEffect(() => {
+    loadHistory()
     connect()
     return () => wsRef.current?.close()
   }, [])
+
+  async function loadHistory() {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/session/${sessionId.current}`)
+      const history = await res.json()
+      if (!history.length) return
+      const restored = history.map(m => ({ role: m.role, text: m.text, time: new Date() }))
+      setMessages([WELCOME, ...restored])
+    } catch {}
+  }
+
+  function newChat() {
+    wsRef.current?.close()
+    localStorage.removeItem('moei_session_id')
+    sessionId.current = getSessionId()
+    setMessages([WELCOME])
+    setInput('')
+    setIsTyping(false)
+    connect()
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -81,11 +103,19 @@ export default function Chat() {
   return (
     <div className="chat-layout">
       <div className="chat-header">
-        <span className="chat-header-title">Customer Support</span>
-        <span className="status-text">
-          <span className={`status-dot ${status}`} />
-          {status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Reconnecting...'}
-        </span>
+        <div>
+          <span className="chat-header-title">Customer Support</span>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{sessionId.current}</div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span className="status-text">
+            <span className={`status-dot ${status}`} />
+            {status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Reconnecting...'}
+          </span>
+          <button onClick={newChat} style={{ fontSize: 12, padding: '4px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer', color: '#6b7280' }}>
+            New Chat
+          </button>
+        </div>
       </div>
 
       <div className="messages">
