@@ -28,6 +28,24 @@ class MessageRole(str, PyEnum):
     agent = "agent"
 
 
+class Customer(Base):
+    """Channel-agnostic customer identity, keyed by phone number.
+
+    Links User rows across channels (telegram/whatsapp/voice/webchat) so the
+    dashboard can show a single cross-channel briefing per real-world person.
+    """
+
+    __tablename__ = "customers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    phone: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    language: Mapped[str] = mapped_column(String(10), default="en")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    users: Mapped[list["User"]] = relationship("User", back_populates="customer")
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -36,7 +54,9 @@ class User(Base):
     channel: Mapped[ChannelType] = mapped_column(SAEnum(ChannelType), nullable=False)
     language: Mapped[str] = mapped_column(String(10), default="en")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"), nullable=True)
 
+    customer: Mapped["Customer | None"] = relationship("Customer", back_populates="users")
     tickets: Mapped[list["Ticket"]] = relationship("Ticket", back_populates="user")
 
 
@@ -62,6 +82,8 @@ class Message(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # nullable — messages exist independently of tickets for general inquiries
     ticket_id: Mapped[int | None] = mapped_column(ForeignKey("tickets.id"), nullable=True)
+    # nullable — set via resolve_user(); lets the dashboard join messages -> users -> customers
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     session_id: Mapped[str] = mapped_column(String(255), nullable=False)
     channel: Mapped[ChannelType] = mapped_column(SAEnum(ChannelType), nullable=False)
     role: Mapped[MessageRole] = mapped_column(SAEnum(MessageRole), nullable=False)

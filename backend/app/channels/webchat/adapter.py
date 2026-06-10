@@ -17,7 +17,8 @@ def _detect_language(text: str) -> str:
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
     await websocket.accept()
-    logger.info("WebSocket connected | session=%s", session_id)
+    phone = websocket.query_params.get("phone") or None
+    logger.info("WebSocket connected | session=%s | phone=%s", session_id, phone)
 
     try:
         while True:
@@ -31,6 +32,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str) -> None:
                 user_id=session_id,
                 text=text,
                 language=_detect_language(text),
+                phone=phone,
             )
 
             logger.info("WebSocket message | session=%s | text=%.80s", session_id, text)

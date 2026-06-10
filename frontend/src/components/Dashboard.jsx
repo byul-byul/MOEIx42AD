@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, PieChart, Pie, Legend } from 'recharts'
 
 // Relative URL — proxied through port 3000, works behind any public URL
@@ -30,7 +30,12 @@ const SENTIMENT_EMOJI = { positive: '😊', neutral: '😐', negative: '😟' }
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [copilot, setCopilot] = useState(null)
+  const [customers, setCustomers] = useState([])
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null)
+  const [briefing, setBriefing] = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
+
+  const briefingSectionRef = useRef(null)
 
   useEffect(() => {
     fetchAll()
@@ -38,8 +43,12 @@ export default function Dashboard() {
     return () => clearInterval(id)
   }, [])
 
+  useEffect(() => {
+    if (selectedCustomerId != null) fetchBriefing(selectedCustomerId)
+  }, [selectedCustomerId])
+
   async function fetchAll() {
-    await Promise.all([fetchMetrics(), fetchCopilot()])
+    await Promise.all([fetchMetrics(), fetchCopilot(), fetchCustomers()])
     setLastUpdated(new Date())
   }
 
@@ -57,6 +66,41 @@ export default function Dashboard() {
     } catch {}
   }
 
+  async function fetchCustomers() {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/customers`)
+      const json = await res.json()
+      setCustomers(json.customers || [])
+    } catch {}
+  }
+
+  async function fetchBriefing(id) {
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/customers/${id}/briefing`)
+      if (!res.ok) { setBriefing(null); return }
+      setBriefing(await res.json())
+    } catch {
+      setBriefing(null)
+    }
+  }
+
+  function viewCustomer(id) {
+    setSelectedCustomerId(id)
+    briefingSectionRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  async function updateTicket(ticketId, status) {
+    try {
+      await fetch(`${BACKEND_URL}/api/tickets/${ticketId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      await fetchMetrics()
+      if (selectedCustomerId != null) await fetchBriefing(selectedCustomerId)
+    } catch {}
+  }
+
   if (!data) return <div style={{ padding: 32, color: '#6b7280' }}>Loading metrics…</div>
 
   const channelData = Object.entries(data.messages_by_channel || {}).map(([name, value]) => ({ name, value }))
@@ -71,10 +115,26 @@ export default function Dashboard() {
   })).filter(d => d.value > 0)
 
   const escalatedCount = data.tickets?.escalated || 0
+  const alerts = (copilot?.suggestions || []).filter(s => s.sentiment === 'negative')
 
   return (
     <div className="dashboard-layout">
       <div className="dashboard-title">Operations Dashboard</div>
+
+      {/* Sentiment alerts */}
+      {alerts.length > 0 && (
+        <div className="alert-banner">
+          <div className="alert-banner-title">🚨 Negative sentiment detected</div>
+          {alerts.map((a, i) => (
+            <div key={i} className="alert-item">
+              <span><strong>{a.channel}</strong> · {a.session_id} · {a.user_message}</span>
+              {a.customer_id != null && (
+                <button className="alert-action" onClick={() => viewCustomer(a.customer_id)}>View Customer</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Stats row */}
       <div className="stats-grid">
@@ -239,6 +299,91 @@ export default function Dashboard() {
         {lastUpdated && (
           <div className="refresh-note">Auto-refresh every 5s · Last updated {lastUpdated.toLocaleTimeString()}</div>
         )}
+      </div>
+
+      {/* Customer 360 */}
+      <div className="table-card" ref={briefingSectionRef}>
+        <div className="chart-title">Customer 360</div>
+        <div className="customer-360-grid">
+          <div className="customer-list">
+            {customers.length === 0 ? (
+              <p style={{ color: '#9ca3af', fontSize: 14 }}>No customers yet.</p>
+            ) : (
+              customers.map(c => (
+                <div
+                  key={c.id}
+                  className={`customer-card ${selectedCustomerId === c.id ? 'selected' : ''}`}
+                  onClick={() => setSelectedCustomerId(c.id)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ fontSize: 13 }}>{c.phone}</strong>
+                    <span>{SENTIMENT_EMOJI[c.last_sentiment] || ''}</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, margin: '6px 0', flexWrap: 'wrap' }}>
+                    {c.channels.map(ch => (
+                      <span key={ch} className="badge" style={{ background: CHANNEL_COLORS[ch] || '#94a3b8', color: 'white' }}>{ch}</span>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6b7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {c.last_message}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="briefing-panel">
+            {selectedCustomerId == null ? (
+              <p style={{ color: '#9ca3af', fontSize: 14 }}>Select a customer to view their briefing.</p>
+            ) : !briefing ? (
+              <p style={{ color: '#9ca3af', fontSize: 14 }}>Loading briefing…</p>
+            ) : (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div>
+                    <strong>{briefing.customer.phone}</strong>
+                    {briefing.customer.name && <span style={{ marginLeft: 8, color: '#6b7280' }}>{briefing.customer.name}</span>}
+                  </div>
+                  <span className={`urgency-badge ${briefing.briefing.urgency}`}>{briefing.briefing.urgency} urgency</span>
+                </div>
+
+                <p style={{ fontSize: 13, marginBottom: 12 }}>{briefing.briefing.summary}</p>
+
+                <div className="recommended-action">
+                  <strong>Recommended action:</strong> {briefing.briefing.recommended_action}
+                </div>
+
+                {briefing.tickets.length > 0 && (
+                  <div style={{ margin: '16px 0' }}>
+                    <div className="chart-title" style={{ marginBottom: 8 }}>Tickets</div>
+                    {briefing.tickets.map(t => (
+                      <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                        <span>#{t.id} · {t.channel} · <span className={`badge ${t.status}`}>{t.status}</span></span>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {t.status !== 'in_progress' && <button className="ticket-action-btn" onClick={() => updateTicket(t.id, 'in_progress')}>In Progress</button>}
+                          {t.status !== 'resolved' && <button className="ticket-action-btn" onClick={() => updateTicket(t.id, 'resolved')}>Resolve</button>}
+                          {t.status !== 'escalated' && <button className="ticket-action-btn escalate" onClick={() => updateTicket(t.id, 'escalated')}>Escalate</button>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="chart-title" style={{ marginBottom: 8 }}>Conversation Timeline</div>
+                <div className="timeline">
+                  {briefing.history.map((h, i) => (
+                    <div key={i} className="timeline-item">
+                      <span style={{ fontSize: 11, color: '#9ca3af' }}>
+                        <strong>{h.channel}</strong> · {h.role} · {new Date(h.timestamp).toLocaleString()}
+                      </span>
+                      <div style={{ fontSize: 13 }}>{h.text}</div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

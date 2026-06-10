@@ -20,6 +20,8 @@ function formatTime(date) {
 export default function Chat() {
   const WELCOME = { role: 'agent', text: 'Hello! I\'m the MOEI AI Assistant. How can I help you today?\nمرحباً! أنا مساعد وزارة الطاقة والبنية التحتية. كيف يمكنني مساعدتك؟', time: new Date() }
 
+  const [phone, setPhone]         = useState(() => localStorage.getItem('moei_phone'))
+  const [phoneInput, setPhoneInput] = useState('')
   const [messages, setMessages]   = useState([WELCOME])
   const [input, setInput]         = useState('')
   const [status, setStatus]       = useState('connecting')
@@ -33,10 +35,11 @@ export default function Chat() {
   const chunksRef        = useRef([])
 
   useEffect(() => {
+    if (!phone) return
     loadHistory()
     connect()
     return () => wsRef.current?.close()
-  }, [])
+  }, [phone])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -61,9 +64,18 @@ export default function Chat() {
     connect()
   }
 
+  function submitPhone(e) {
+    e.preventDefault()
+    const trimmed = phoneInput.trim()
+    if (!trimmed) return
+    localStorage.setItem('moei_phone', trimmed)
+    setPhone(trimmed)
+  }
+
   function connect() {
     setStatus('connecting')
-    const ws = new WebSocket(`${WS_PROTOCOL}//${location.host}/ws/${sessionId.current}`)
+    const params = phone ? `?phone=${encodeURIComponent(phone)}` : ''
+    const ws = new WebSocket(`${WS_PROTOCOL}//${location.host}/ws/${sessionId.current}${params}`)
     ws.onopen  = () => setStatus('connected')
     ws.onclose = () => { setStatus('disconnected'); setTimeout(connect, 3000) }
     ws.onerror = () => setStatus('disconnected')
@@ -118,6 +130,7 @@ export default function Chat() {
     const form = new FormData()
     form.append('audio', blob, 'recording.webm')
     form.append('session_id', sessionId.current)
+    if (phone) form.append('phone', phone)
 
     try {
       const res  = await fetch('/voice/message', { method: 'POST', body: form })
@@ -146,6 +159,32 @@ export default function Chat() {
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+
+  if (!phone) {
+    return (
+      <div className="chat-layout">
+        <div className="phone-gate">
+          <div className="phone-gate-card">
+            <div className="chat-header-title" style={{ marginBottom: 8 }}>Welcome to MOEI Customer Support</div>
+            <p style={{ color: '#6b7280', fontSize: 13, marginBottom: 16 }}>
+              Share your phone number so we recognize you across WhatsApp, voice, and web chat.
+            </p>
+            <form onSubmit={submitPhone} style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="tel"
+                className="chat-input phone-input"
+                placeholder="+9715xxxxxxxx"
+                value={phoneInput}
+                onChange={e => setPhoneInput(e.target.value)}
+                autoFocus
+              />
+              <button type="submit" className="send-btn" disabled={!phoneInput.trim()}>Continue</button>
+            </form>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="chat-layout">

@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.channels.telegram.adapter import router as telegram_router
 from app.channels.voice.adapter import router as voice_router
+from app.channels.whatsapp.adapter import router as whatsapp_router
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -20,6 +21,7 @@ app.add_middleware(
 
 app.include_router(telegram_router)
 app.include_router(voice_router)
+app.include_router(whatsapp_router)
 
 
 @app.get("/health", tags=["ops"])

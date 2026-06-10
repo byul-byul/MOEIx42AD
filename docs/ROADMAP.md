@@ -35,10 +35,15 @@
 - Audio response played in-browser from base64
 - Messages stored in DB as `channel="voice"`
 
-### Phase 5 ⬜ — WhatsApp channel (superseded — see Planned P0 below)
-- ~~Meta Cloud API webhook~~ — replaced by Twilio WhatsApp Sandbox (see Planned P0)
-- Same adapter pattern as Telegram
+### Phase 5 ✅ — WhatsApp channel (Twilio Sandbox)
+- Twilio WhatsApp Sandbox webhook (`POST /whatsapp/webhook`), same `BaseChannel`
+  adapter pattern as Telegram
+- Synchronous TwiML reply (`MessagingResponse`) — no outbound API calls/credentials
+- `session_id = whatsapp_{phone}`, phone number doubles as the cross-channel
+  Customer Identity key
 - Adapter: `backend/app/channels/whatsapp/adapter.py`
+- Reuses the `make cloudflare` tunnel; webhook URL registered manually in the
+  Twilio Sandbox console
 
 ### Phase 6 ✅ — Polish: sentiment, co-pilot, tests, demo prep
 - **Sentiment analysis:** GPT-4o-mini classifier (`positive` / `neutral` / `negative`)
@@ -54,9 +59,9 @@
 
 ---
 
-## Planned (P0) — Unified Customer Identity, WhatsApp (Twilio), Agent Briefing, Sentiment Alerts
+## Phase 7 ✅ — Unified Customer Identity, WhatsApp (Twilio), Agent Briefing, Sentiment Alerts
 
-Approved plan (2026-06-10) addressing team review feedback: the MVP needs to
+Implemented (2026-06-10), addressing team review feedback: the MVP needs to
 tell an "unified omnichannel customer engagement" story — a single customer
 identity across channels, real cross-channel context, and an employee
 dashboard that briefs agents instead of just showing metrics. Given ~24h
@@ -144,12 +149,6 @@ Decisions already made:
   not populated" tech debt, add new tech debt items below
 - Remove stray `CLAUDE.md.backup`
 
-### New tech debt (to be added once P0 lands)
-- Real prosody/audio-based voice emotion detection (P0 uses transcript sentiment)
-- Cross-channel identity linking beyond phone ("link my Telegram/WhatsApp")
-- Twilio webhook signature verification
-- Twilio Voice (P1) — real phone calls, same customer/agent context
-
 ### Verification
 1. Update models, `make fclean && make bup && make seed`
 2. `make ps` — all health checks green
@@ -186,11 +185,21 @@ Run with: `make test`
 
 ### 🟡 Medium — fix before wider rollout
 
-#### Cross-channel identity linking
-- Same person on Telegram (`telegram_123`) and web chat (`webchat_abc`) has separate session histories with no link between them
-- **Demo workaround:** Presenter manually enters the Telegram session ID in the web chat input
-- **Fix:** `identities` table linking `(channel, channel_user_id)` pairs to a single internal `user_id`
-- **Effort:** ~3h
+#### Cross-channel identity linking beyond phone number
+- Identity linking now works when the customer provides the *same* phone
+  number on every channel (Phase 7). A customer who starts on web chat
+  without a phone, or uses a different number on WhatsApp, still gets a
+  separate `User`/history with no link to their other channels.
+- **Fix:** "Link my WhatsApp/Telegram" flow — e.g. a one-time code sent via
+  the new channel that the customer enters on the existing one, merging
+  `User` rows under one `Customer`.
+- **Effort:** ~2h
+
+#### Twilio webhook signature verification
+- `POST /whatsapp/webhook` accepts any request — no verification that it
+  came from Twilio.
+- **Fix:** validate the `X-Twilio-Signature` header against `TWILIO_AUTH_TOKEN`.
+- **Effort:** ~30min
 
 #### Chat history fallback to DB missing
 - `GET /api/session/{id}` reads from Redis only
@@ -205,10 +214,18 @@ Run with: `make test`
 
 ### 🟢 Low — nice to have
 
-#### Users table not populated for general inquiries
-- `users` rows only created when `create_ticket` tool is called
-- **Fix:** Upsert a user row on every first message in a session
-- **Effort:** ~30min
+#### Real prosody/audio-based voice emotion detection
+- Voice "emotion" is currently transcript-sentiment via `classify_sentiment()`
+  (Phase 7) — accurate for content, not tone of voice.
+- **Fix:** analyze the raw audio (pitch, pace, energy) with a prosody/emotion
+  model in `voice/adapter.py`, alongside transcript sentiment.
+- **Effort:** ~3h+
+
+#### Twilio Voice (real phone calls)
+- P1 from the team review: TwiML voice webhook + Twilio's STT/Gather → agent
+  → TTS `Say`, reusing the same phone-based `Customer`/session context as
+  WhatsApp.
+- **Effort:** ~3h
 
 #### Redis has no persistence
 - Default Redis config is in-memory only; restart loses all active sessions

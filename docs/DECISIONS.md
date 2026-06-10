@@ -51,15 +51,29 @@ Stored in DB as `channel = "voice"`. Architecturally a separate channel adapter.
 
 ---
 
-## [DECIDED] Cross-channel session identity — shared vs. separate
+## [DECIDED] Cross-channel session identity — phone number as universal key
 
-**Status:** decided — separate for now, deferred to post-hackathon
+**Status:** decided (2026-06-10) — superseded the "separate for now" decision below
 
-**Decision:** Each channel generates its own `session_id` (`telegram_xxx`, `webchat_xxx`). No cross-channel identity linking.
+**Decision:** Each channel still generates its own `session_id`
+(`telegram_xxx`, `webchat_xxx`, `whatsapp_+9715xxx`), but every `User` row can
+now link to a shared `Customer` row keyed by phone number
+(`users.customer_id` → `customers.phone`). WhatsApp always carries the phone
+number (it's the channel address); web chat asks for it once on first load
+("phone gate", stored in `localStorage`); voice carries it the same way.
+`resolve_user()` (`backend/app/agent/identity.py`) does the find-or-create and
+linking on every message.
 
-**Demo workaround:** Presenter can type the Telegram session ID manually into the web chat to demonstrate shared context.
+**Demo:** message the WhatsApp sandbox and the web chat with the same phone
+number — `/api/customers` shows one customer with both channels, and
+`/api/customers/{id}/briefing` returns the merged cross-channel history.
 
-**Full fix:** `identities` table (see `ROADMAP.md` tech debt). Estimated ~3h.
+**Deferred:** "link my existing Telegram/WhatsApp" flow for users who didn't
+start with a phone number — see `ROADMAP.md` tech debt.
+
+~~Previous decision (kept for history): each channel generates its own
+`session_id` with no cross-channel linking; presenter manually re-typed the
+Telegram session ID into web chat to fake shared context.~~
 
 ---
 
@@ -80,20 +94,41 @@ What is the minimum viable co-pilot for the hackathon?
 
 ---
 
-## [OPEN] WhatsApp — required for MVP or bonus?
+## [DECIDED] WhatsApp — Twilio Sandbox instead of Meta Cloud API
 
-**Status:** open — confirm with team
+**Status:** decided (2026-06-10)
 
-**Question:**  
-WhatsApp is the 4th channel in the requirements. We have a stub (`channels/whatsapp/adapter.py`).  
-Is a working WhatsApp integration required for the submission, or is the architecture + stub sufficient?
+**Decision:** `channels/whatsapp/adapter.py` implements `BaseChannel` (same
+pattern as Telegram) on top of the **Twilio WhatsApp Sandbox**: `POST
+/whatsapp/webhook` receives `From`/`Body` form fields, replies synchronously
+via TwiML (`MessagingResponse`) — no outbound API calls or Twilio credentials
+needed. Reuses the existing `make cloudflare` tunnel
+(`https://<tunnel>.trycloudflare.com/whatsapp/webhook`), registered manually
+in the Twilio Sandbox console (no setup API like Telegram's).
 
-**Context:**  
-WhatsApp Cloud API requires a Meta business account, phone number verification, and webhook with HTTPS. Setup takes 2-4h outside of coding time.
+**Why not Meta Cloud API:** requires a verified business account and
+phone-number setup that takes hours outside of coding time. Twilio Sandbox
+works immediately with a $15 trial credit and the phone number it sends
+*is* the Customer Identity key (see cross-channel identity decision above).
 
-**Options:**
-1. Implement fully (same pattern as Telegram, ~2h code + Meta setup time)
-2. Show the stub + architecture in the pitch ("follows the same adapter pattern, can be activated with credentials")
-3. Use WhatsApp Business Test number via Meta Developer sandbox
+**Removed:** unused Meta-oriented `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`
+/ `WHATSAPP_VERIFY_TOKEN` settings.
 
-**Recommendation:** Confirm with team. If any team member already has a Meta developer account, go for option 1. Otherwise option 2 is defensible given the architecture.
+**Tech debt:** Twilio webhook signature verification (anyone can POST to
+`/whatsapp/webhook` right now — acceptable for a hackathon demo, not for prod).
+
+---
+
+## [DEFERRED] Real prosody/audio-based voice emotion detection
+
+**Status:** deferred — tech debt
+
+**Context:** team feedback asked for real-time voice emotion/tone detection
+("if a client sounds sad, raise an alert"). For P0, voice emotion reuses the
+existing transcript-based `classify_sentiment()` — the same sentiment
+pipeline as text channels, applied to the Whisper transcript. This is honest
+("voice sentiment analysis") and ships with zero new risk.
+
+**Full fix:** analyze the raw audio (pitch, pace, energy) via a
+prosody/emotion model, in addition to transcript sentiment. Out of scope for
+the hackathon timeline.

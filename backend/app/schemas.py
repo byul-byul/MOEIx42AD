@@ -13,6 +13,9 @@ class IncomingMessage(BaseModel):
     user_id: str
     text: str
     language: Literal["en", "ar"] = "en"
+    # Universal cross-channel customer key. Always set for whatsapp (the
+    # channel address itself is a phone number); optional elsewhere.
+    phone: str | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -25,6 +28,12 @@ class AgentResponse(BaseModel):
     sentiment: str = "neutral"
     ticket_id: int | None = None
     escalate: bool = False
+
+
+class TicketUpdate(BaseModel):
+    """Body for PATCH /api/tickets/{id} — agent dashboard ticket actions."""
+
+    status: Literal["open", "in_progress", "resolved", "escalated"]
 
 
 class HealthResponse(BaseModel):

@@ -26,11 +26,6 @@ class Settings(BaseSettings):
     # Inter-service
     backend_url: str = "http://backend:8000"
 
-    # WhatsApp
-    whatsapp_token: str = ""
-    whatsapp_phone_number_id: str = ""
-    whatsapp_verify_token: str = ""
-
     # ElevenLabs
     elevenlabs_api_key: str = ""
 

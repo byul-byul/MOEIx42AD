@@ -28,6 +28,7 @@ def _detect_language(text: str) -> str:
 async def voice_message(
     audio: UploadFile = File(...),
     session_id: str = Form(...),
+    phone: str | None = Form(None),
 ) -> JSONResponse:
     """
     Accepts a voice recording, runs it through STT → agent → TTS,
@@ -56,6 +57,7 @@ async def voice_message(
         user_id=session_id,
         text=transcript,
         language=_detect_language(transcript),
+        phone=phone,
     )
     try:
         async with httpx.AsyncClient(timeout=30) as client:

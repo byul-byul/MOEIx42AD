@@ -50,16 +50,27 @@ CONVERSATIONS = [
         "I'm very happy with the fast response I got last time, thank you!",
         "I just wanted to check my ticket status: #1",
     ]),
+    # Same customer (phone) on web chat then WhatsApp — demonstrates the
+    # unified cross-channel identity / Customer 360 panel.
+    ("webchat", "web_demo_9", [
+        "Hi, I'm following up on my power outage ticket from yesterday.",
+        "My number is +971501234567 in case you need to reach me.",
+    ], "+971501234567"),
+    ("whatsapp", "+971501234567", [
+        "Hi, this is the same customer following up via WhatsApp.",
+        "Still no update on my outage ticket — this is really frustrating.",
+    ], "+971501234567"),
 ]
 
 
-async def send_message(client: httpx.AsyncClient, session_id: str, channel: str, user_id: str, text: str):
+async def send_message(client: httpx.AsyncClient, session_id: str, channel: str, user_id: str, text: str, phone: str | None = None):
     payload = {
         "session_id": session_id,
         "channel": channel,
         "user_id": user_id,
         "text": text,
         "language": "ar" if any(ord(c) > 0x600 for c in text) else "en",
+        "phone": phone,
     }
     try:
         r = await client.post(f"{BACKEND}/api/message", json=payload, timeout=30)
@@ -90,11 +101,13 @@ async def main():
             return
 
         print()
-        for channel, user_id, messages in CONVERSATIONS:
+        for conv in CONVERSATIONS:
+            channel, user_id, messages = conv[0], conv[1], conv[2]
+            phone = conv[3] if len(conv) > 3 else None
             session_id = f"{channel}_{user_id}"
             print(f"Session: {session_id}")
             for text in messages:
-                await send_message(client, session_id, channel, user_id, text)
+                await send_message(client, session_id, channel, user_id, text, phone)
                 await asyncio.sleep(random.uniform(0.3, 0.8))
             print()
 

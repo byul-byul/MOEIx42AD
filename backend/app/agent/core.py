@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
+from app.agent.identity import resolve_user
 from app.agent.sentiment import classify_sentiment
 from app.agent.tools import channel_ctx, create_ticket, get_ticket_status, session_ctx
 from app.core.config import settings
@@ -149,8 +150,10 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
     try:
         channel_enum = ChannelType(msg.channel)
         async with AsyncSessionFactory() as db:
+            user = await resolve_user(db, msg.session_id, channel_enum, msg.phone, msg.language)
             db.add(Message(
                 ticket_id=ticket_id,
+                user_id=user.id,
                 session_id=msg.session_id,
                 channel=channel_enum,
                 role=MessageRole.user,
@@ -159,6 +162,7 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
             ))
             db.add(Message(
                 ticket_id=ticket_id,
+                user_id=user.id,
                 session_id=msg.session_id,
                 channel=channel_enum,
                 role=MessageRole.agent,
