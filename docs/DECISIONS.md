@@ -68,6 +68,13 @@ linking on every message.
 number — `/api/customers` shows one customer with both channels, and
 `/api/customers/{id}/briefing` returns the merged cross-channel history.
 
+**Telegram follow-up (closed 2026-06-10):** Telegram now participates in the
+same identity scheme. On `/start`, the bot shows a one-tap "📱 Share phone
+number" button (`request_contact`); the resulting `Contact.phone_number` is
+sent through `resolve_user()` like any other channel, so a customer who
+shares their phone on Telegram links into the same `Customer` row as
+WhatsApp/web chat.
+
 **Deferred:** "link my existing Telegram/WhatsApp" flow for users who didn't
 start with a phone number — see `ROADMAP.md` tech debt.
 
@@ -114,8 +121,11 @@ works immediately with a $15 trial credit and the phone number it sends
 **Removed:** unused Meta-oriented `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID`
 / `WHATSAPP_VERIFY_TOKEN` settings.
 
-**Tech debt:** Twilio webhook signature verification (anyone can POST to
-`/whatsapp/webhook` right now — acceptable for a hackathon demo, not for prod).
+**Closed (2026-06-10):** `X-Twilio-Signature` verification is now implemented
+— if `TWILIO_AUTH_TOKEN` is set, every `/whatsapp/webhook` request is
+validated with `twilio.request_validator.RequestValidator` and rejected
+(403) if the signature doesn't match. Left optional (empty token = no check)
+so the Sandbox demo works without registering Twilio credentials.
 
 ---
 

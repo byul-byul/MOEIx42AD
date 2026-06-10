@@ -43,7 +43,7 @@ ngrok config add-authtoken <your-ngrok-token>
 make bup
 ```
 
-`make bup` does: **ngrok → build → up → telegram webhook registration**.
+`make bup` does: **build → up → ngrok + cloudflare tunnels → telegram webhook registration → print all public links**.
 
 ---
 
@@ -51,7 +51,7 @@ make bup
 
 ```
 /
-├── docker-compose.yml          ← all 5 services
+├── docker-compose.yml          ← all 5 services + named volumes (pg_data, redis_data)
 ├── Makefile                    ← all dev commands
 ├── .env.example                ← env template (commit this)
 ├── .env                        ← secrets (never commit, gitignored)
@@ -59,13 +59,16 @@ make bup
 ├── docs/
 │   ├── USER_DOC.md
 │   ├── DEV_DOC.md
-│   ├── ROADMAP.md
-│   └── DECISIONS.md            ← open questions and architecture ADRs
+│   ├── ROADMAP.md              ← phases, tech debt
+│   ├── DECISIONS.md            ← open questions and architecture ADRs
+│   ├── DEPLOYMENT.md           ← full local deployment + API key setup
+│   └── DEMO_REFERENCES.md      ← demo script, pitch, AI usage breakdown
 ├── tests/
-│   ├── test_health.py          ← 5 integration health tests
-│   └── test_agent.py           ← 5 agent integration tests
+│   ├── test_health.py          ← integration health tests
+│   └── test_agent.py           ← agent integration tests
 ├── scripts/
-│   └── seed_demo.py            ← seeds realistic demo data
+│   ├── seed_demo.py            ← seeds realistic demo data
+│   └── print_links.py          ← prints current public demo links (make links)
 └── backend/
     ├── Dockerfile
     ├── requirements.txt        ← core dependencies
@@ -73,28 +76,30 @@ make bup
     └── app/
         ├── main.py             ← FastAPI app (port 8000)
         ├── channels_main.py    ← Channels app (port 8001)
-        ├── models.py           ← SQLAlchemy ORM
+        ├── models.py           ← SQLAlchemy ORM (Customer, User, Ticket, Message)
         ├── schemas.py          ← Pydantic schemas
         ├── core/
         │   ├── config.py       ← pydantic-settings
         │   ├── logger.py       ← get_logger(__name__)
         │   ├── database.py     ← async engine, get_db()
-        │   └── redis.py        ← session read/write
+        │   └── redis.py        ← session read/write (get_session/save_session)
         ├── agent/
         │   ├── core.py         ← LangGraph agent, run_agent()
-        │   ├── memory.py       ← Redis session helpers
+        │   ├── identity.py     ← resolve_user(): phone-based Customer linking
+        │   ├── briefing.py     ← GPT-4o-mini cross-channel agent briefing
         │   ├── sentiment.py    ← GPT-4o-mini sentiment classifier
         │   └── tools.py        ← create_ticket, get_ticket_status
         ├── api/
         │   └── message.py      ← POST /api/message, GET /api/session/{id}
         ├── channels/
         │   ├── base.py                  ← abstract BaseChannel
-        │   ├── telegram/adapter.py      ← ✅ implemented
-        │   ├── webchat/adapter.py       ← ✅ implemented (WebSocket)
-        │   ├── voice/adapter.py         ← ✅ implemented (Whisper STT + OpenAI TTS)
-        │   └── whatsapp/adapter.py      ← ⬜ Phase 5 stub
+        │   ├── telegram/adapter.py      ← ✅ incl. /start phone-share onboarding
+        │   ├── webchat/adapter.py       ← ✅ WebSocket, reads ?phone= query param
+        │   ├── voice/adapter.py         ← ✅ Whisper STT + OpenAI TTS
+        │   └── whatsapp/adapter.py      ← ✅ Twilio WhatsApp Sandbox (TwiML reply)
         └── dashboard/
-            └── metrics.py      ← GET /api/metrics, GET /api/copilot
+            └── metrics.py      ← /api/metrics, /api/copilot, /api/customers,
+                                   /api/customers/{id}/briefing, PATCH /api/tickets/{id}
 ```
 
 ---
@@ -116,31 +121,44 @@ Backend and channels share the same Docker image (`./backend`). The difference i
 ## Message flow
 
 ```
-User (Telegram / WebChat / Voice)
+User (Telegram / WhatsApp / WebChat / Voice)
     │
     ▼
-Channel Adapter (channels service, port 8001)
-    │  parse_incoming() → IncomingMessage
+Channel Adapter (channels service, port 8001 — Telegram/WhatsApp/Voice)
+    │  parse_incoming() → IncomingMessage (+ phone, when known)
     │  POST http://backend:8000/api/message
     ▼
 Backend (port 8000) — run_agent()
     │
     ├─ Load session history (Redis key: session:{session_id})
     ├─ Reconstruct LangChain messages
-    ├─ LangGraph: LLM → [tools?] → LLM
+    ├─ LangGraph: LLM (gpt-4o) → [tools?] → LLM
     │      Tools: create_ticket(), get_ticket_status()
     ├─ classify_sentiment(user_text) → GPT-4o-mini
-    ├─ Save messages to Redis (last 20, TTL 1h)
-    ├─ Save messages to Postgres (permanent, with sentiment)
+    ├─ Save messages to Redis (last 20, TTL 1h, AOF-persisted)
+    ├─ resolve_user() → find-or-create User; if `phone` is set,
+    │      find-or-create Customer(phone) and link user.customer_id
+    ├─ Save both turns to Postgres (user_id set, sentiment attached)
     └─ Return AgentResponse
     │
 Channel Adapter
     │  send_response() → user sees reply
 ```
 
-**WebChat** connects directly via WebSocket (`/ws/{session_id}`) and calls `run_agent()` in-process.
+**WebChat** connects directly via WebSocket (`/ws/{session_id}?phone=...`) and calls `run_agent()` in-process. The `phone` query param (set once via the "phone gate" on first load) is attached to every `IncomingMessage` for that connection.
 
-**Voice** flow: browser mic → WebM blob → `POST /voice/message` → Whisper STT → `run_agent()` → OpenAI TTS → MP3 base64 → browser plays audio.
+**Voice** flow: browser mic → WebM blob → `POST /voice/message` (with `session_id` + optional `phone`) → Whisper STT → `run_agent()` → OpenAI TTS → MP3 base64 → browser plays audio.
+
+**WhatsApp** flow: Twilio Sandbox POSTs `From`/`Body` (form-encoded) to `POST /whatsapp/webhook` → optional `X-Twilio-Signature` check → `run_agent()` → reply returned synchronously as TwiML (`MessagingResponse`), no outbound Twilio API call needed. `phone` is always set (it's the `From` address itself).
+
+**Telegram** flow: on `/start`, the bot sends a one-tap "📱 Share phone number" button (`request_contact`); the resulting `Contact.phone_number` is forwarded as a normal agent turn with `phone` set, linking this Telegram user to the same `Customer` as other channels.
+
+---
+
+## Customer identity & agent briefing
+
+- **`agent/identity.py::resolve_user()`** — called on every message. Finds-or-creates a `User` row keyed by `(channel, channel_user_id)` (the part of `session_id` after the first `_`). If `phone` is known and the user isn't linked yet, finds-or-creates a `Customer(phone=...)` and sets `user.customer_id`. This is the single mechanism that makes "same phone number across channels = same customer" work.
+- **`agent/briefing.py::generate_briefing()`** — given a customer's full cross-channel message history (oldest first), asks GPT-4o-mini (JSON mode) for `{summary, urgency: low|medium|high, recommended_action}`. Used by `GET /api/customers/{id}/briefing` to power the Customer 360 panel. Falls back to a safe default (`urgency: medium`) on any error, same defensive pattern as `classify_sentiment`.
 
 ---
 
@@ -165,7 +183,11 @@ docker exec moei-redis-1 redis-cli GET "session:telegram_12345"
 
 ### Postgres — persistent data
 
-Tables: `users`, `tickets`, `messages`
+Tables: `customers`, `users`, `tickets`, `messages`
+
+- `customers` — universal cross-channel identity, keyed by `phone` (unique)
+- `users` — one row per `(channel, channel_user_id)`, optionally linked to a `customer` via `customer_id`
+- `messages` — has both `session_id` (channel-local) and `user_id` (set via `resolve_user()`), enabling cross-channel history joins
 
 ```bash
 # Connect
@@ -175,6 +197,14 @@ docker exec -it moei-db-1 psql -U moei -d moei
 \dt                                                  -- list tables
 SELECT session_id, channel, role, sentiment, LEFT(text, 60) FROM messages ORDER BY timestamp DESC LIMIT 20;
 SELECT * FROM tickets ORDER BY created_at DESC;
+
+-- Cross-channel history for one customer
+SELECT m.channel, m.role, LEFT(m.text, 60), m.timestamp
+FROM messages m
+JOIN users u ON u.id = m.user_id
+JOIN customers c ON c.id = u.customer_id
+WHERE c.phone = '+9715xxxxxxxx'
+ORDER BY m.timestamp;
 ```
 
 **Volume:** `pg_data` (Docker named volume). Survives `make down`. Destroyed by `make fclean`.
@@ -185,6 +215,7 @@ SELECT * FROM tickets ORDER BY created_at DESC;
 
 | Variable | Default | Required | Description |
 |----------|---------|----------|-------------|
+| `PUBLIC_BASE_URL` | — | auto | Public web app URL, set by `make ngrok` |
 | `POSTGRES_HOST` | `db` | — | DB hostname (use `db` in Docker) |
 | `POSTGRES_PORT` | `5432` | — | DB port |
 | `POSTGRES_DB` | `moei` | — | Database name |
@@ -192,17 +223,17 @@ SELECT * FROM tickets ORDER BY created_at DESC;
 | `POSTGRES_PASSWORD` | `changeme` | ✅ | DB password |
 | `REDIS_HOST` | `redis` | — | Redis hostname |
 | `REDIS_PORT` | `6379` | — | Redis port |
-| `OPENAI_API_KEY` | — | ✅ | GPT-4o + GPT-4o-mini + Whisper + TTS |
+| `OPENAI_API_KEY` | — | ✅ | Powers everything: GPT-4o (agent), GPT-4o-mini (sentiment + briefing), Whisper (STT), TTS |
+| `NGROK_AUTH_TOKEN` | — | for `make ngrok` | ngrok authtoken (`ngrok config add-authtoken ...`) |
 | `TELEGRAM_BOT_TOKEN` | — | ✅ | From @BotFather |
-| `TELEGRAM_WEBHOOK_URL` | — | auto | Set by `make ngrok` |
+| `TELEGRAM_WEBHOOK_URL` | — | auto | Set by `make cloudflare` |
+| `TWILIO_AUTH_TOKEN` | `""` | optional | Enables `X-Twilio-Signature` verification on `/whatsapp/webhook`; leave empty for sandbox demos |
 | `BACKEND_URL` | `http://backend:8000` | — | Inter-service URL (channels → backend) |
-| `TTS_VOICE` | `nova` | — | OpenAI TTS voice (alloy/echo/fable/onyx/nova/shimmer) |
-| `WHATSAPP_TOKEN` | — | Phase 5 | Meta Cloud API token |
-| `WHATSAPP_PHONE_NUMBER_ID` | — | Phase 5 | Meta phone number ID |
-| `WHATSAPP_VERIFY_TOKEN` | — | Phase 5 | Webhook verify token |
-| `ELEVENLABS_API_KEY` | — | unused | Kept for future TTS upgrade |
+| `ELEVENLABS_API_KEY` | — | unused | Reserved for a future TTS upgrade |
 | `APP_ENV` | `development` | — | Controls SQLAlchemy echo |
 | `LOG_LEVEL` | `INFO` | — | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+> **Note:** `OPENAI_MODEL` and `TTS_VOICE` appear in some older `.env` files but are not read by `app.core.config.Settings` — models are currently hardcoded (`gpt-4o` for the agent, `gpt-4o-mini` for sentiment/briefing, `tts-1` / `nova` for TTS in `voice/adapter.py`). Safe to leave unset.
 
 ---
 
@@ -259,10 +290,14 @@ Interactive docs available at **http://localhost:8000/docs** (Swagger UI).
 | `/api/session/{id}` | GET | backend | Fetch Redis session history |
 | `/api/metrics` | GET | backend | Dashboard metrics (sessions, tickets, sentiment, channels) |
 | `/api/copilot` | GET | backend | Recent conversations + AI-suggested replies for human agents |
-| `/ws/{session_id}` | WS | backend | WebChat WebSocket |
+| `/api/customers` | GET | backend | Customers with ≥1 message, sorted by last activity |
+| `/api/customers/{id}/briefing` | GET | backend | Cross-channel history + tickets + AI briefing for one customer |
+| `/api/tickets/{id}` | PATCH | backend | Update ticket status (`open`/`in_progress`/`resolved`/`escalated`) |
+| `/ws/{session_id}` | WS | backend | WebChat WebSocket (`?phone=` optional query param) |
 | `/telegram/webhook` | POST | channels | Telegram update receiver |
 | `/telegram/setup` | POST | channels | Register webhook with Telegram |
 | `/voice/message` | POST | channels | Voice: audio file → STT → agent → TTS audio response |
+| `/whatsapp/webhook` | POST | channels | Twilio WhatsApp Sandbox webhook (TwiML reply) |
 
 ---
 
@@ -318,6 +353,9 @@ make logs-channels    # check channel service errors
 make telegram-setup   # re-register webhook
 # Check ngrok is running: curl http://localhost:4040/api/tunnels
 ```
+
+**WhatsApp (Twilio Sandbox) not replying:**
+Tunnel URLs change on every `make bup` — Twilio has no setup API like Telegram, so the Sandbox "when a message comes in" webhook URL must be re-pasted manually in the Twilio console after each restart. Run `make links` to get the current `/whatsapp/webhook` URL. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 **`No module named 'app'`:**  
 Backend volume mount works because the working directory is `/app` and `./backend` is mounted there. If running locally (outside Docker), set `PYTHONPATH=backend`.

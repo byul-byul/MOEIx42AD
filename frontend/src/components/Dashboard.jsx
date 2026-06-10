@@ -7,9 +7,9 @@ const POLL_INTERVAL = 5000
 
 const CHANNEL_COLORS = {
   telegram: '#0088cc',
-  webchat: '#006241',
+  webchat: '#0A1F3D',
   whatsapp: '#25d366',
-  voice: '#c8a951',
+  voice: '#C5A46E',
 }
 
 const STATUS_COLORS = {
@@ -257,7 +257,7 @@ export default function Dashboard() {
                   <strong>Customer:</strong> {s.user_message}
                 </div>
                 {s.suggested_reply && (
-                  <div style={{ fontSize: 13, color: '#006241', background: '#f0fdf4', padding: '6px 10px', borderRadius: 6 }}>
+                  <div style={{ fontSize: 13, color: '#0A1F3D', background: '#FFFBF5', border: '1px solid #E8D5B7', padding: '6px 10px', borderRadius: 8 }}>
                     <strong>AI suggestion:</strong> {s.suggested_reply}
                   </div>
                 )}
