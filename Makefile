@@ -1,5 +1,5 @@
 # /Makefile
-.PHONY: build up down clean fclean bup ngrok cloudflare telegram-setup ps logs logs-backend logs-channels logs-frontend logs-db logs-redis test seed
+.PHONY: build up down clean fclean bup ngrok cloudflare telegram-setup links ps logs logs-backend logs-channels logs-frontend logs-db logs-redis test seed
 
 build:
 	docker compose build
@@ -13,7 +13,6 @@ down:
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null; \
 	find . -name "*.pyc" -delete 2>/dev/null; \
-	docker compose down --remove-orphans
 
 fclean: clean
 	docker compose down -v
@@ -67,7 +66,10 @@ telegram-setup:
 	until curl -s http://localhost:8001/health > /dev/null 2>&1; do sleep 1; done; \
 	curl -s -X POST http://localhost:8001/telegram/setup | python3 -m json.tool
 
-bup: build up ngrok cloudflare telegram-setup
+bup: build up ngrok cloudflare telegram-setup links
+
+links:
+	@python3 scripts/print_links.py
 
 ps:
 	docker compose ps
