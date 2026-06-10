@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, PieChart, Pie, Legend } from 'recharts'
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
+// Relative URL — proxied through port 3000, works behind any public URL
+const BACKEND_URL = ''
 const POLL_INTERVAL = 5000
 
 const CHANNEL_COLORS = {

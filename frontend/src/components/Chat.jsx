@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 
-const BACKEND_WS   = import.meta.env.VITE_BACKEND_WS_URL  || 'ws://localhost:8000'
-const BACKEND_URL  = import.meta.env.VITE_BACKEND_URL     || 'http://localhost:8000'
-const CHANNELS_URL = import.meta.env.VITE_CHANNELS_URL    || 'http://localhost:8001'
+// Relative URLs — proxied by Vite (dev) or nginx (prod) through port 3000
+// This makes the app work behind any public URL (ngrok, Railway, etc.) without rebuilding
+const WS_PROTOCOL = location.protocol === 'https:' ? 'wss:' : 'ws:'
 
 function getSessionId() {
   let id = localStorage.getItem('moei_session_id')
@@ -44,7 +44,7 @@ export default function Chat() {
 
   async function loadHistory() {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/session/${sessionId.current}`)
+      const res = await fetch(`/api/session/${sessionId.current}`)
       const history = await res.json()
       if (!history.length) return
       setMessages([WELCOME, ...history.map(m => ({ role: m.role, text: m.text, time: new Date() }))])
@@ -63,7 +63,7 @@ export default function Chat() {
 
   function connect() {
     setStatus('connecting')
-    const ws = new WebSocket(`${BACKEND_WS}/ws/${sessionId.current}`)
+    const ws = new WebSocket(`${WS_PROTOCOL}//${location.host}/ws/${sessionId.current}`)
     ws.onopen  = () => setStatus('connected')
     ws.onclose = () => { setStatus('disconnected'); setTimeout(connect, 3000) }
     ws.onerror = () => setStatus('disconnected')
@@ -120,7 +120,7 @@ export default function Chat() {
     form.append('session_id', sessionId.current)
 
     try {
-      const res  = await fetch(`${CHANNELS_URL}/voice/message`, { method: 'POST', body: form })
+      const res  = await fetch('/voice/message', { method: 'POST', body: form })
       const data = await res.json()
 
       if (data.error) {
