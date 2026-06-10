@@ -1,6 +1,7 @@
 # /backend/app/channels/whatsapp/adapter.py
 import httpx
-from fastapi import APIRouter, Form, Response
+from fastapi import APIRouter, Form, Request, Response
+from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 
 from app.channels.base import BaseChannel
@@ -15,6 +16,15 @@ router = APIRouter(prefix="/whatsapp", tags=["whatsapp"])
 
 def _detect_language(text: str) -> str:
     return "ar" if any("؀" <= ch <= "ۿ" for ch in text) else "en"
+
+
+def _public_url(request: Request) -> str:
+    """Reconstruct the externally-visible URL Twilio signed, since requests
+    arrive via the Cloudflare tunnel (proto/host differ from the local
+    uvicorn-visible request.url)."""
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc))
+    return f"{proto}://{host}{request.url.path}"
 
 
 class WhatsAppChannel(BaseChannel):
@@ -44,8 +54,16 @@ _channel = WhatsAppChannel()
 
 
 @router.post("/webhook")
-async def webhook(From: str = Form(...), Body: str = Form("")) -> Response:
+async def webhook(request: Request, From: str = Form(...), Body: str = Form("")) -> Response:
     """Twilio WhatsApp Sandbox webhook — replies synchronously via TwiML."""
+    if settings.twilio_auth_token:
+        signature = request.headers.get("X-Twilio-Signature", "")
+        validator = RequestValidator(settings.twilio_auth_token)
+        form = await request.form()
+        if not validator.validate(_public_url(request), dict(form), signature):
+            logger.warning("Rejected /whatsapp/webhook: invalid Twilio signature")
+            return Response(status_code=403)
+
     logger.info("WhatsApp message received | from=%s", From)
 
     incoming = await _channel.parse_incoming({"From": From, "Body": Body})

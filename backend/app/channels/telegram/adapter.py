@@ -1,7 +1,7 @@
 # /backend/app/channels/telegram/adapter.py
 import httpx
 from fastapi import APIRouter, Request, Response
-from telegram import Bot, Update
+from telegram import Bot, KeyboardButton, ReplyKeyboardMarkup, Update
 
 from app.channels.base import BaseChannel
 from app.core.config import settings
@@ -26,7 +26,25 @@ class TelegramChannel(BaseChannel):
             return None
         update = Update.de_json(raw, _bot)
         message = update.message or update.edited_message
-        if not message or not message.text:
+        if not message:
+            return None
+
+        # Reply to a shared contact: link this Telegram user to a phone-based
+        # Customer (see agent/identity.py) via a normal agent turn.
+        if message.contact:
+            phone = message.contact.phone_number
+            if not phone.startswith("+"):
+                phone = f"+{phone}"
+            return IncomingMessage(
+                session_id=f"telegram_{message.from_user.id}",
+                channel="telegram",
+                user_id=str(message.from_user.id),
+                text="Thanks, here is my phone number for cross-channel support.",
+                language="en",
+                phone=phone,
+            )
+
+        if not message.text:
             return None
 
         return IncomingMessage(
@@ -52,8 +70,31 @@ _channel = TelegramChannel()
 
 @router.post("/webhook")
 async def webhook(request: Request) -> Response:
+    if _bot is None:
+        return Response(status_code=200)
+
     payload = await request.json()
     logger.info("Telegram update received")
+
+    update = Update.de_json(payload, _bot)
+    message = update.message or update.edited_message
+
+    # Onboarding: ask new chats to share their phone number once, so this
+    # Telegram user can be linked to the same Customer as WhatsApp/web chat
+    # (see agent/identity.py). The button disappears after one tap.
+    if message and message.text == "/start":
+        keyboard = ReplyKeyboardMarkup(
+            [[KeyboardButton("📱 Share phone number", request_contact=True)]],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+        )
+        await _bot.send_message(
+            chat_id=message.chat_id,
+            text="Welcome! Please share your phone number so we can recognize "
+            "you across channels (WhatsApp, web chat).",
+            reply_markup=keyboard,
+        )
+        return Response(status_code=200)
 
     incoming = await _channel.parse_incoming(payload)
     if incoming is None:

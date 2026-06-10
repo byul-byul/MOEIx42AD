@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_webhook_url: str = ""  # e.g. https://<ngrok>.ngrok.io/telegram/webhook
 
+    # Twilio (WhatsApp Sandbox). Optional: when set, /whatsapp/webhook
+    # verifies the X-Twilio-Signature header. Leave empty for sandbox demos
+    # without Twilio credentials.
+    twilio_auth_token: str = ""
+
     # Inter-service
     backend_url: str = "http://backend:8000"
 

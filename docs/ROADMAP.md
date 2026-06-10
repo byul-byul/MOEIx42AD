@@ -149,6 +149,18 @@ Decisions already made:
   not populated" tech debt, add new tech debt items below
 - Remove stray `CLAUDE.md.backup`
 
+### Follow-up (closed 2026-06-10)
+Three quick wins identified during tech-debt review, all shipped:
+- **Telegram phone capture**: `/start` sends a one-tap "Share phone number"
+  button (`request_contact`); the shared contact links the Telegram `User`
+  to the same `Customer` as WhatsApp/web chat — closes the cross-channel gap
+  for the last channel.
+- **Redis AOF persistence**: `redis-server --appendonly yes` +
+  `redis_data` volume — live sessions survive a container restart.
+- **Twilio webhook signature verification**: `/whatsapp/webhook` validates
+  `X-Twilio-Signature` against `TWILIO_AUTH_TOKEN` when set (optional —
+  sandbox demo works unchanged without it).
+
 ### Verification
 1. Update models, `make fclean && make bup && make seed`
 2. `make ps` — all health checks green
@@ -187,19 +199,14 @@ Run with: `make test`
 
 #### Cross-channel identity linking beyond phone number
 - Identity linking now works when the customer provides the *same* phone
-  number on every channel (Phase 7). A customer who starts on web chat
-  without a phone, or uses a different number on WhatsApp, still gets a
-  separate `User`/history with no link to their other channels.
+  number on every channel (Phase 7), including Telegram via a one-tap
+  `request_contact` button on `/start` (closed 2026-06-10). A customer who
+  starts on web chat without a phone, or uses a *different* number on another
+  channel, still gets a separate `User`/history with no link.
 - **Fix:** "Link my WhatsApp/Telegram" flow — e.g. a one-time code sent via
   the new channel that the customer enters on the existing one, merging
   `User` rows under one `Customer`.
 - **Effort:** ~2h
-
-#### Twilio webhook signature verification
-- `POST /whatsapp/webhook` accepts any request — no verification that it
-  came from Twilio.
-- **Fix:** validate the `X-Twilio-Signature` header against `TWILIO_AUTH_TOKEN`.
-- **Effort:** ~30min
 
 #### Chat history fallback to DB missing
 - `GET /api/session/{id}` reads from Redis only
@@ -226,11 +233,6 @@ Run with: `make test`
   → TTS `Say`, reusing the same phone-based `Customer`/session context as
   WhatsApp.
 - **Effort:** ~3h
-
-#### Redis has no persistence
-- Default Redis config is in-memory only; restart loses all active sessions
-- **Fix:** Enable AOF or RDB persistence in `docker-compose.yml` redis config
-- **Effort:** ~15min
 
 #### No rate limiting
 - `/api/message` and `/ws/` endpoints have no rate limiting
