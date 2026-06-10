@@ -25,6 +25,7 @@ A unified AI agent that handles customer inquiries across multiple channels with
 - Real-time **leadership dashboard**: live metrics, sentiment chart, ticket table, **negative-sentiment alert banner**
 - **AI co-pilot panel** — live feed of conversations with AI-suggested replies for human agents
 - **Customer 360 / AI case briefing** — for any customer, an AI-generated summary of their full cross-channel history, an urgency score, a recommended action, and one-click ticket actions (In Progress / Resolve / Escalate)
+- **Voice tone detection** — analyzes the raw audio (loudness + pitch) to classify how a voice message *sounded* (agitated / calm / flat), shown as a badge and factored into the AI briefing's urgency
 
 ---
 

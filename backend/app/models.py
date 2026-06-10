@@ -89,6 +89,9 @@ class Message(Base):
     role: Mapped[MessageRole] = mapped_column(SAEnum(MessageRole), nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     sentiment: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Voice channel only: coarse tone label from prosody analysis
+    # (agitated | calm | flat), see agent/prosody.py
+    voice_tone: Mapped[str | None] = mapped_column(String(20), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ticket: Mapped["Ticket | None"] = relationship("Ticket", back_populates="messages")

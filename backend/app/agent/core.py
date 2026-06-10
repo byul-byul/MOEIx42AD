@@ -159,6 +159,7 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
                 role=MessageRole.user,
                 text=msg.text,
                 sentiment=sentiment,
+                voice_tone=msg.voice_tone,
             ))
             db.add(Message(
                 ticket_id=ticket_id,

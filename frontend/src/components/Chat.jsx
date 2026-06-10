@@ -4,10 +4,16 @@ import { useEffect, useRef, useState } from 'react'
 // This makes the app work behind any public URL (ngrok, Railway, etc.) without rebuilding
 const WS_PROTOCOL = location.protocol === 'https:' ? 'wss:' : 'ws:'
 
-function getSessionId() {
+// Deterministic session id for a phone number — re-entering the same phone
+// after Logout always maps to the same session, so history can be restored.
+function sessionIdFromPhone(phone) {
+  return 'webchat_' + phone.replace(/[^a-zA-Z0-9]/g, '')
+}
+
+function getSessionId(phone) {
   let id = localStorage.getItem('moei_session_id')
   if (!id) {
-    id = 'webchat_' + Math.random().toString(36).slice(2, 10)
+    id = phone ? sessionIdFromPhone(phone) : 'webchat_' + Math.random().toString(36).slice(2, 10)
     localStorage.setItem('moei_session_id', id)
   }
   return id
@@ -30,7 +36,7 @@ export default function Chat() {
 
   const wsRef            = useRef(null)
   const bottomRef        = useRef(null)
-  const sessionId        = useRef(getSessionId())
+  const sessionId        = useRef(getSessionId(phone))
   const mediaRecorderRef = useRef(null)
   const chunksRef        = useRef([])
 
@@ -56,8 +62,9 @@ export default function Chat() {
 
   function newChat() {
     wsRef.current?.close()
-    localStorage.removeItem('moei_session_id')
-    sessionId.current = getSessionId()
+    const id = 'webchat_' + Math.random().toString(36).slice(2, 10)
+    localStorage.setItem('moei_session_id', id)
+    sessionId.current = id
     setMessages([WELCOME])
     setInput('')
     setIsTyping(false)
@@ -68,8 +75,24 @@ export default function Chat() {
     e.preventDefault()
     const trimmed = phoneInput.trim()
     if (!trimmed) return
+    const id = sessionIdFromPhone(trimmed)
     localStorage.setItem('moei_phone', trimmed)
+    localStorage.setItem('moei_session_id', id)
+    sessionId.current = id
     setPhone(trimmed)
+  }
+
+  // Logout: clear identity + session, return to the phone gate. Re-entering
+  // the same phone derives the same session id again, so loadHistory()
+  // restores the conversation; a different phone starts fresh.
+  function logout() {
+    wsRef.current?.close()
+    localStorage.removeItem('moei_phone')
+    localStorage.removeItem('moei_session_id')
+    setPhone(null)
+    setPhoneInput('')
+    setMessages([WELCOME])
+    setStatus('connecting')
   }
 
   function connect() {
@@ -200,6 +223,9 @@ export default function Chat() {
           </span>
           <button onClick={newChat} style={{ fontSize: 12, padding: '4px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer', color: '#6b7280' }}>
             New Chat
+          </button>
+          <button onClick={logout} style={{ fontSize: 12, padding: '4px 12px', borderRadius: 8, border: '1px solid #e5e7eb', background: 'white', cursor: 'pointer', color: '#6b7280' }}>
+            Logout
           </button>
         </div>
       </div>

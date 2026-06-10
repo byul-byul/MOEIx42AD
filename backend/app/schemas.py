@@ -16,6 +16,9 @@ class IncomingMessage(BaseModel):
     # Universal cross-channel customer key. Always set for whatsapp (the
     # channel address itself is a phone number); optional elsewhere.
     phone: str | None = None
+    # Voice channel only: coarse tone label from prosody analysis
+    # (agitated | calm | flat), see agent/prosody.py. None for other channels.
+    voice_tone: str | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 

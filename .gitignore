@@ -1,5 +1,6 @@
 .env
 .env.backup
+backups/
 CLAUDE.md*
 __pycache__/
 *.py[cod]

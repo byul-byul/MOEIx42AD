@@ -129,16 +129,39 @@ so the Sandbox demo works without registering Twilio credentials.
 
 ---
 
-## [DEFERRED] Real prosody/audio-based voice emotion detection
+## [DECIDED] Real prosody/audio-based voice emotion detection
 
-**Status:** deferred — tech debt
+**Status:** closed (2026-06-11)
 
 **Context:** team feedback asked for real-time voice emotion/tone detection
-("if a client sounds sad, raise an alert"). For P0, voice emotion reuses the
+("if a client sounds sad, raise an alert"). For P0, voice emotion reused the
 existing transcript-based `classify_sentiment()` — the same sentiment
-pipeline as text channels, applied to the Whisper transcript. This is honest
-("voice sentiment analysis") and ships with zero new risk.
+pipeline as text channels, applied to the Whisper transcript. This was
+honest ("voice sentiment analysis") and shipped with zero new risk, but it
+can't tell *how* something was said — only what was said.
 
-**Full fix:** analyze the raw audio (pitch, pace, energy) via a
-prosody/emotion model, in addition to transcript sentiment. Out of scope for
-the hackathon timeline.
+**Closed (2026-06-11):** added `agent/prosody.py` — a real signal-processing
+pass over the raw recording, run alongside Whisper STT in `voice/adapter.py`.
+It decodes the browser's webm/opus audio to 16kHz mono PCM via `ffmpeg`
+(already in the backend image for Whisper — no new system deps), then
+computes RMS loudness and an autocorrelation-based F0 pitch estimate (80-400
+Hz) using only `numpy`. These are mapped to a coarse `tone`:
+`agitated | calm | flat`.
+
+This is a **heuristic, not a trained ML model** — thresholds
+(`_LOUD_RMS`, `_HIGH_PITCH_HZ`, `_HIGH_PITCH_VARIANCE_HZ`) are tuned for a
+single adult voice on a laptop/phone mic, not validated against a labeled
+emotion dataset. We chose this over a real prosody/emotion model
+(e.g. openSMILE, a wav2vec2 emotion classifier) because those add heavy
+dependencies (torch, audio feature libs) and meaningful build time/size risk
+on demo day, for a result that judges can't verify is "more correct" than a
+simple heuristic in a 3-minute demo.
+
+`voice_tone` is stored on the user `Message` row, surfaced in
+`/api/copilot` and `/api/customers/{id}/briefing`, shown as a badge in the
+dashboard (Co-pilot panel + conversation timeline), and fed into the
+cross-channel briefing prompt (`agent/briefing.py`) — an "agitated" tone
+nudges the AI briefing toward higher urgency even if the transcript wording
+is neutral. Analysis runs in parallel with Whisper STT (`asyncio.gather`)
+and fails safe (`None`) on any error, same defensive pattern as
+`classify_sentiment`/`generate_briefing`.

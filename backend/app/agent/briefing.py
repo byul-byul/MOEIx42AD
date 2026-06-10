@@ -22,6 +22,9 @@ Respond with strict JSON only, in this exact shape:
 - urgency: "high" if the customer is angry, blocked, or reports a safety
   issue; "medium" if there is an open problem but no immediate risk; "low"
   for general inquiries or resolved issues.
+- Some voice messages include a "tone" tag (agitated | calm | flat) from
+  audio analysis — treat "agitated" as a strong signal toward higher urgency,
+  even if the words themselves seem neutral.
 - recommended_action: one concrete next step for the agent.
 """
 
@@ -37,7 +40,9 @@ async def generate_briefing(history: list[dict]) -> dict:
         return default
 
     transcript = "\n".join(
-        f"[{h['channel']}] {h['role']}: {h['text']}" for h in history
+        f"[{h['channel']}{', tone: ' + h['voice_tone'] if h.get('voice_tone') else ''}] "
+        f"{h['role']}: {h['text']}"
+        for h in history
     )
 
     try:

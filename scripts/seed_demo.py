@@ -60,10 +60,16 @@ CONVERSATIONS = [
         "Hi, this is the same customer following up via WhatsApp.",
         "Still no update on my outage ticket — this is really frustrating.",
     ], "+971501234567"),
+    # Voice channel — each message is (text, voice_tone) to demonstrate the
+    # prosody-based tone badge without recording real audio.
+    ("voice", "voice_demo_10", [
+        ("This is the third time my power has gone out this month, I need someone to fix this now!", "agitated"),
+        ("Okay... thank you for creating the ticket, I guess.", "flat"),
+    ]),
 ]
 
 
-async def send_message(client: httpx.AsyncClient, session_id: str, channel: str, user_id: str, text: str, phone: str | None = None):
+async def send_message(client: httpx.AsyncClient, session_id: str, channel: str, user_id: str, text: str, phone: str | None = None, voice_tone: str | None = None):
     payload = {
         "session_id": session_id,
         "channel": channel,
@@ -71,6 +77,7 @@ async def send_message(client: httpx.AsyncClient, session_id: str, channel: str,
         "text": text,
         "language": "ar" if any(ord(c) > 0x600 for c in text) else "en",
         "phone": phone,
+        "voice_tone": voice_tone,
     }
     try:
         r = await client.post(f"{BACKEND}/api/message", json=payload, timeout=30)
@@ -78,7 +85,8 @@ async def send_message(client: httpx.AsyncClient, session_id: str, channel: str,
         data = r.json()
         sentiment = data.get("sentiment", "?")
         ticket = f" | ticket #{data['ticket_id']}" if data.get("ticket_id") else ""
-        print(f"  [{channel}] {user_id}: {text[:50]!r} → sentiment={sentiment}{ticket}")
+        tone = f" | tone={voice_tone}" if voice_tone else ""
+        print(f"  [{channel}] {user_id}: {text[:50]!r} → sentiment={sentiment}{tone}{ticket}")
     except Exception as e:
         print(f"  ERROR {session_id}: {e}")
 
@@ -106,8 +114,9 @@ async def main():
             phone = conv[3] if len(conv) > 3 else None
             session_id = f"{channel}_{user_id}"
             print(f"Session: {session_id}")
-            for text in messages:
-                await send_message(client, session_id, channel, user_id, text, phone)
+            for entry in messages:
+                text, voice_tone = entry if isinstance(entry, tuple) else (entry, None)
+                await send_message(client, session_id, channel, user_id, text, phone, voice_tone)
                 await asyncio.sleep(random.uniform(0.3, 0.8))
             print()
 

@@ -116,6 +116,7 @@ call, not a hardcoded response. Here's the full inventory:
 | 6 | **Speech-to-text** | OpenAI Whisper API | Converts the browser microphone recording to text before it hits the same agent pipeline | `backend/app/channels/voice/adapter.py` |
 | 7 | **Text-to-speech** | OpenAI TTS (`tts-1`, voice `nova`) | Converts the agent's reply back to spoken audio | `backend/app/channels/voice/adapter.py` |
 | 8 | **AI Co-pilot suggestions** | Reuses the agent's own generated replies (component 1) | Live feed for human agents of "here's what the AI would say / did say" — a ready-made response to approve or adapt | `backend/app/dashboard/metrics.py` (`/api/copilot`) |
+| 9 | **Voice prosody / tone analysis** | Signal processing on the raw audio (RMS energy + autocorrelation pitch via `numpy`/`ffmpeg`) | Classifies how the customer *sounded* — `agitated` / `calm` / `flat` — independent of the words; feeds the tone badge and nudges the AI briefing's urgency | `backend/app/agent/prosody.py` |
 
 **Why this is more than "a chatbot with a UI":**
 
@@ -176,8 +177,13 @@ steps below with a phone number that is *not* in the seed data, so the
   increment live
 
 ### Step 4 — Voice (≈30s)
-- Open Web Chat, tap 🎤, ask a question out loud (English or Arabic)
+- Open Web Chat, tap 🎤, ask a question out loud — try a frustrated tone of
+  voice for one message
 - Agent transcribes (Whisper), answers, and **speaks the answer back** (TTS)
+- In Customer 360 / Co-pilot, point out the **tone badge** (🔥 agitated / 🙂
+  calm / 😶 flat) on the voice message — *"this comes from analyzing the
+  audio waveform itself, not the transcript — the AI briefing factors it in
+  too."*
 
 ### Step 5 — Leadership view (≈30s)
 - Scroll back to the top: **Active Sessions, Total/Open/Escalated Tickets**,
@@ -241,7 +247,6 @@ that thinks past the demo.
 | Item | Why we deferred it | What "done" looks like |
 |------|---------------------|--------------------------|
 | **Account linking without a phone number** | Phone-based identity covers the primary demo story (WhatsApp + Telegram + Web with the same number); a customer who starts on web *without* a phone gets a separate profile | A "link my WhatsApp/Telegram" flow — one-time code sent on the new channel, entered on the existing one, merging `User` rows under one `Customer` (~2h) |
-| **Real prosody/audio-based voice emotion detection** | Risky to get right in 48h; transcript-based sentiment (already built) gives an honest, working "voice sentiment" today | Analyze pitch/pace/energy from the raw audio in `voice/adapter.py`, alongside transcript sentiment (~3h+) |
 
 ### Longer-term (Phase 9 — telephony & scale)
 
@@ -276,6 +281,15 @@ a single-word classification from a fixed set; the briefing uses JSON mode
 with a fixed schema and a safe fallback (`urgency: medium`) if parsing
 fails. It's a real classifier, with the same reliability pattern you'd want
 in production (graceful degradation, never a hard error to the user).
+
+**"How does the voice tone badge work — is it a trained emotion model?"**
+No — it's a transparent heuristic, not ML. `agent/prosody.py` decodes the
+recording with `ffmpeg`, then computes RMS loudness and an autocorrelation
+pitch (F0) estimate with `numpy`. Loud + high/variable pitch → `agitated`;
+quiet + flat pitch → `flat`; otherwise `calm`. We chose this over a trained
+prosody/emotion model because it's dependency-light (no torch/audio-ML
+libs), explainable, and runs in milliseconds alongside Whisper — see
+`docs/DECISIONS.md` for the full trade-off.
 
 **"What does this cost to run?"**
 The full demo (8 seeded conversations + live demo messages + voice +

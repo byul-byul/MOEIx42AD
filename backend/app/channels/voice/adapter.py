@@ -1,4 +1,5 @@
 # /backend/app/channels/voice/adapter.py
+import asyncio
 import base64
 
 import httpx
@@ -6,6 +7,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 from openai import AsyncOpenAI
 
+from app.agent.prosody import analyze_prosody
 from app.core.config import settings
 from app.core.logger import get_logger
 from app.schemas import AgentResponse, IncomingMessage
@@ -18,6 +20,12 @@ _openai = AsyncOpenAI(api_key=settings.openai_api_key)
 
 # ElevenLabs voice ID can be configured later; OpenAI TTS used by default
 _TTS_VOICE = "nova"  # alloy | echo | fable | onyx | nova | shimmer
+
+# MOEI only supports these two languages. Whisper's language auto-detection
+# can misfire on short or accented clips (e.g. detecting Turkish/Welsh for
+# English speech) — if it picks anything else, we retry forced to English,
+# the far more common misdetection direction for Latin-script audio.
+_SUPPORTED_WHISPER_LANGS = {"english", "arabic"}
 
 
 def _detect_language(text: str) -> str:
@@ -36,19 +44,42 @@ async def voice_message(
     """
     logger.info("Voice message received | session=%s | content_type=%s", session_id, audio.content_type)
 
-    # 1. STT — OpenAI Whisper
+    # 1. STT — OpenAI Whisper, run alongside prosody analysis (independent of
+    # the transcript, both consume the same raw audio_bytes). verbose_json
+    # gives us the auto-detected language so we can catch misdetections.
     audio_bytes = await audio.read()
+    audio_file = (audio.filename or "recording.webm", audio_bytes, audio.content_type or "audio/webm")
+    stt_task = _openai.audio.transcriptions.create(
+        model="whisper-1",
+        file=audio_file,
+        response_format="verbose_json",
+    )
+    prosody_task = analyze_prosody(audio_bytes)
     try:
-        transcript_obj = await _openai.audio.transcriptions.create(
-            model="whisper-1",
-            file=(audio.filename or "recording.webm", audio_bytes, audio.content_type or "audio/webm"),
-        )
+        transcript_obj, prosody = await asyncio.gather(stt_task, prosody_task)
         transcript = transcript_obj.text.strip()
     except Exception as exc:
         logger.error("Whisper STT failed: %s", exc)
         return JSONResponse(status_code=502, content={"error": f"STT failed: {exc}"})
 
-    logger.info("Transcript | session=%s | text=%.80s", session_id, transcript)
+    detected_lang = (getattr(transcript_obj, "language", "") or "").lower()
+    if detected_lang not in _SUPPORTED_WHISPER_LANGS:
+        logger.warning(
+            "Whisper detected unsupported language '%s' | session=%s — retrying forced to English",
+            detected_lang, session_id,
+        )
+        try:
+            retry_obj = await _openai.audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="en",
+            )
+            transcript = retry_obj.text.strip()
+        except Exception as exc:
+            logger.error("Whisper retry (forced English) failed: %s — using original transcript", exc)
+
+    voice_tone = prosody["tone"] if prosody else None
+    logger.info("Transcript | session=%s | text=%.80s | voice_tone=%s", session_id, transcript, voice_tone)
 
     # 2. Agent
     incoming = IncomingMessage(
@@ -58,6 +89,7 @@ async def voice_message(
         text=transcript,
         language=_detect_language(transcript),
         phone=phone,
+        voice_tone=voice_tone,
     )
     try:
         async with httpx.AsyncClient(timeout=30) as client:

@@ -70,8 +70,9 @@ key) unlocks most of this with minimal scope. See `feedback.txt` for the full
 team review and prioritization discussion.
 
 Decisions already made:
-- Voice emotion detection stays text-transcript-based (reuses `sentiment.py`);
-  true prosody/audio-based emotion analysis → tech debt.
+- Voice emotion detection started text-transcript-based (reuses
+  `sentiment.py`); real prosody/audio-based emotion analysis followed as a
+  closed follow-up (2026-06-11) — see below.
 - Web chat asks for a phone number on first load ("soft login"); a "link
   existing channel" flow → tech debt.
 - Twilio Voice (real phone calls) is P1, after this P0 lands.
@@ -161,6 +162,16 @@ Three quick wins identified during tech-debt review, all shipped:
   `X-Twilio-Signature` against `TWILIO_AUTH_TOKEN` when set (optional —
   sandbox demo works unchanged without it).
 
+### Follow-up (closed 2026-06-11)
+- **Real prosody/audio-based voice emotion detection**: new
+  `agent/prosody.py` decodes the voice recording via `ffmpeg` (already in
+  the image) and computes RMS loudness + autocorrelation pitch (F0) with
+  `numpy`, classifying a coarse `tone: agitated | calm | flat`. Runs in
+  parallel with Whisper STT in `voice/adapter.py`, stored on `Message.voice_tone`,
+  surfaced in `/api/copilot` and `/api/customers/{id}/briefing` (and fed into
+  the AI briefing prompt), and shown as a badge in the dashboard. See
+  `docs/DECISIONS.md` for the heuristic-vs-ML trade-off.
+
 ### Verification
 1. Update models, `make fclean && make bup && make seed`
 2. `make ps` — all health checks green
@@ -220,13 +231,6 @@ Run with: `make test`
 - **Effort:** ~1h
 
 ### 🟢 Low — nice to have
-
-#### Real prosody/audio-based voice emotion detection
-- Voice "emotion" is currently transcript-sentiment via `classify_sentiment()`
-  (Phase 7) — accurate for content, not tone of voice.
-- **Fix:** analyze the raw audio (pitch, pace, energy) with a prosody/emotion
-  model in `voice/adapter.py`, alongside transcript sentiment.
-- **Effort:** ~3h+
 
 #### Twilio Voice (real phone calls)
 - P1 from the team review: TwiML voice webhook + Twilio's STT/Gather → agent

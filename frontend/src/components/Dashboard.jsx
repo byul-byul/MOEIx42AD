@@ -27,6 +27,8 @@ const SENTIMENT_COLORS = {
 
 const SENTIMENT_EMOJI = { positive: '😊', neutral: '😐', negative: '😟' }
 
+const TONE_EMOJI = { agitated: '🔥', calm: '🙂', flat: '😶' }
+
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [copilot, setCopilot] = useState(null)
@@ -251,6 +253,11 @@ export default function Dashboard() {
                   </span>
                   <span style={{ fontSize: 11 }}>
                     {SENTIMENT_EMOJI[s.sentiment] || ''} {s.sentiment}
+                    {s.voice_tone && (
+                      <span className={`tone-badge ${s.voice_tone}`}>
+                        {TONE_EMOJI[s.voice_tone] || ''} {s.voice_tone}
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div style={{ fontSize: 13, color: '#374151', marginBottom: 6 }}>
@@ -375,6 +382,11 @@ export default function Dashboard() {
                     <div key={i} className="timeline-item">
                       <span style={{ fontSize: 11, color: '#9ca3af' }}>
                         <strong>{h.channel}</strong> · {h.role} · {new Date(h.timestamp).toLocaleString()}
+                        {h.voice_tone && (
+                          <span className={`tone-badge ${h.voice_tone}`}>
+                            {TONE_EMOJI[h.voice_tone] || ''} {h.voice_tone}
+                          </span>
+                        )}
                       </span>
                       <div style={{ fontSize: 13 }}>{h.text}</div>
                     </div>

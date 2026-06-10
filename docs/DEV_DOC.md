@@ -88,6 +88,7 @@ make bup
         │   ├── identity.py     ← resolve_user(): phone-based Customer linking
         │   ├── briefing.py     ← GPT-4o-mini cross-channel agent briefing
         │   ├── sentiment.py    ← GPT-4o-mini sentiment classifier
+        │   ├── prosody.py      ← voice tone heuristic (RMS + pitch via ffmpeg/numpy)
         │   └── tools.py        ← create_ticket, get_ticket_status
         ├── api/
         │   └── message.py      ← POST /api/message, GET /api/session/{id}
@@ -138,7 +139,8 @@ Backend (port 8000) — run_agent()
     ├─ Save messages to Redis (last 20, TTL 1h, AOF-persisted)
     ├─ resolve_user() → find-or-create User; if `phone` is set,
     │      find-or-create Customer(phone) and link user.customer_id
-    ├─ Save both turns to Postgres (user_id set, sentiment attached)
+    ├─ Save both turns to Postgres (user_id set, sentiment attached;
+    │      voice_tone attached for the voice channel)
     └─ Return AgentResponse
     │
 Channel Adapter
@@ -147,7 +149,7 @@ Channel Adapter
 
 **WebChat** connects directly via WebSocket (`/ws/{session_id}?phone=...`) and calls `run_agent()` in-process. The `phone` query param (set once via the "phone gate" on first load) is attached to every `IncomingMessage` for that connection.
 
-**Voice** flow: browser mic → WebM blob → `POST /voice/message` (with `session_id` + optional `phone`) → Whisper STT → `run_agent()` → OpenAI TTS → MP3 base64 → browser plays audio.
+**Voice** flow: browser mic → WebM blob → `POST /voice/message` (with `session_id` + optional `phone`) → Whisper STT *and* `agent/prosody.py::analyze_prosody()` run concurrently (`asyncio.gather`) → `run_agent()` (with `voice_tone` attached) → OpenAI TTS → MP3 base64 → browser plays audio.
 
 **WhatsApp** flow: Twilio Sandbox POSTs `From`/`Body` (form-encoded) to `POST /whatsapp/webhook` → optional `X-Twilio-Signature` check → `run_agent()` → reply returned synchronously as TwiML (`MessagingResponse`), no outbound Twilio API call needed. `phone` is always set (it's the `From` address itself).
 
@@ -158,7 +160,8 @@ Channel Adapter
 ## Customer identity & agent briefing
 
 - **`agent/identity.py::resolve_user()`** — called on every message. Finds-or-creates a `User` row keyed by `(channel, channel_user_id)` (the part of `session_id` after the first `_`). If `phone` is known and the user isn't linked yet, finds-or-creates a `Customer(phone=...)` and sets `user.customer_id`. This is the single mechanism that makes "same phone number across channels = same customer" work.
-- **`agent/briefing.py::generate_briefing()`** — given a customer's full cross-channel message history (oldest first), asks GPT-4o-mini (JSON mode) for `{summary, urgency: low|medium|high, recommended_action}`. Used by `GET /api/customers/{id}/briefing` to power the Customer 360 panel. Falls back to a safe default (`urgency: medium`) on any error, same defensive pattern as `classify_sentiment`.
+- **`agent/briefing.py::generate_briefing()`** — given a customer's full cross-channel message history (oldest first), asks GPT-4o-mini (JSON mode) for `{summary, urgency: low|medium|high, recommended_action}`. Used by `GET /api/customers/{id}/briefing` to power the Customer 360 panel. Voice messages with a `voice_tone` are tagged in the transcript (e.g. `[voice, tone: agitated]`) — an "agitated" tone nudges urgency up even if the wording is neutral. Falls back to a safe default (`urgency: medium`) on any error, same defensive pattern as `classify_sentiment`.
+- **`agent/prosody.py::analyze_prosody()`** — voice channel only. Decodes the raw recording to 16kHz mono PCM via `ffmpeg`, then computes RMS loudness and an autocorrelation-based F0 pitch estimate (80-400 Hz) with `numpy`, classifying a coarse `tone: agitated | calm | flat`. A heuristic, not a trained model — see `docs/DECISIONS.md`. Stored on `Message.voice_tone`; returns `None` on any decode/analysis error (defensive pattern).
 
 ---
 
@@ -187,7 +190,7 @@ Tables: `customers`, `users`, `tickets`, `messages`
 
 - `customers` — universal cross-channel identity, keyed by `phone` (unique)
 - `users` — one row per `(channel, channel_user_id)`, optionally linked to a `customer` via `customer_id`
-- `messages` — has both `session_id` (channel-local) and `user_id` (set via `resolve_user()`), enabling cross-channel history joins
+- `messages` — has both `session_id` (channel-local) and `user_id` (set via `resolve_user()`), enabling cross-channel history joins. `voice_tone` (nullable) holds the prosody-based tone label (`agitated | calm | flat`) for voice-channel user messages — see `agent/prosody.py`
 
 ```bash
 # Connect
@@ -195,7 +198,7 @@ docker exec -it moei-db-1 psql -U moei -d moei
 
 # Useful queries
 \dt                                                  -- list tables
-SELECT session_id, channel, role, sentiment, LEFT(text, 60) FROM messages ORDER BY timestamp DESC LIMIT 20;
+SELECT session_id, channel, role, sentiment, voice_tone, LEFT(text, 60) FROM messages ORDER BY timestamp DESC LIMIT 20;
 SELECT * FROM tickets ORDER BY created_at DESC;
 
 -- Cross-channel history for one customer

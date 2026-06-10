@@ -130,7 +130,7 @@ If any recent customer message was classified as **negative** sentiment, a red b
 
 ### AI Co-pilot — Suggested Replies
 
-Live feed of the 10 most recent customer messages, each with the channel, sentiment, and the AI-generated reply that was actually sent — giving a human agent a ready-made response to reuse or adapt.
+Live feed of the 10 most recent customer messages, each with the channel, sentiment, and the AI-generated reply that was actually sent — giving a human agent a ready-made response to reuse or adapt. For voice messages, a **tone badge** (🔥 agitated / 🙂 calm / 😶 flat) shows how the customer *sounded*, based on pitch and loudness — not just what they said.
 
 ### Recent Tickets
 
@@ -145,7 +145,7 @@ A two-column panel at the bottom of the dashboard:
   - **Urgency badge** (low / medium / high) and an **AI-generated summary** of their situation, produced by GPT-4o-mini from their full cross-channel history
   - **Recommended action** — one concrete next step for the agent
   - **Tickets** with one-click action buttons: **In Progress / Resolve / Escalate**
-  - **Conversation timeline** — every message across every channel, oldest first, with channel and role labels
+  - **Conversation timeline** — every message across every channel, oldest first, with channel and role labels. Voice messages also show the tone badge (🔥 agitated / 🙂 calm / 😶 flat); an agitated tone nudges the AI's urgency assessment up even if the words themselves seem calm
 
 This is the "unified omnichannel" view: a customer who messaged on Telegram, then WhatsApp, then web chat (using the same phone number) shows up as **one** customer with one merged history.
 

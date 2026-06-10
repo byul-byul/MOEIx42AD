@@ -115,6 +115,7 @@ async def get_copilot(db: AsyncSession = Depends(get_db)) -> dict:
             "user_message": um.text,
             "suggested_reply": agent_msg.text if agent_msg else None,
             "sentiment": um.sentiment or "neutral",
+            "voice_tone": um.voice_tone,
             "timestamp": um.timestamp.isoformat(),
             "customer_id": customer_id,
             "phone": phone,
@@ -175,6 +176,7 @@ async def get_customer_briefing(customer_id: int, db: AsyncSession = Depends(get
             "channel": m.channel.value,
             "text": m.text,
             "sentiment": m.sentiment,
+            "voice_tone": m.voice_tone,
             "timestamp": m.timestamp.isoformat(),
         }
         for m in msg_result.scalars()
