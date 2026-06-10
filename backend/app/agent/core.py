@@ -20,6 +20,14 @@ from app.schemas import AgentResponse, IncomingMessage
 
 logger = get_logger(__name__)
 
+# Sentinel text used by channel adapters (e.g. Telegram's "Share phone number"
+# button) for the synthetic turn that links a phone number to the customer
+# identity. Handled below as a short-circuit: it links the identity but never
+# reaches the LLM or the shared cross-channel memory, since GPT has no useful
+# answer for "here is my phone number" and the exchange would otherwise
+# pollute that memory for every channel.
+PHONE_LINK_TEXT = "Thanks, here is my phone number for cross-channel support."
+
 SYSTEM_PROMPT = """You are a bilingual (English / Arabic) AI customer service agent for MOEI —
 the Ministry of Energy and Infrastructure of Abu Dhabi, UAE.
 
@@ -145,6 +153,21 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
                     effective_phone = customer.phone
     except Exception as exc:
         logger.error("Failed to resolve identity: %s", exc)
+
+    # Phone-link turn: identity is already resolved above (which is the only
+    # thing this turn is for) — reply with a canned confirmation and stop
+    # before the LLM / shared memory.
+    if msg.text == PHONE_LINK_TEXT:
+        logger.info("Phone linked | session=%s | phone=%s", msg.session_id, effective_phone)
+        return AgentResponse(
+            session_id=msg.session_id,
+            text="Thanks! Your phone number is now linked across channels — "
+            "we'll remember your conversation wherever you message us.",
+            intent="identity_link",
+            sentiment="neutral",
+            ticket_id=None,
+            escalate=False,
+        )
 
     memory_key = _memory_key(msg.session_id, effective_phone)
 

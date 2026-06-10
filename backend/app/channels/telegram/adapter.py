@@ -3,6 +3,7 @@ import httpx
 from fastapi import APIRouter, Request, Response
 from telegram import Bot, KeyboardButton, ReplyKeyboardMarkup, Update
 
+from app.agent.core import PHONE_LINK_TEXT
 from app.channels.base import BaseChannel
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -39,7 +40,7 @@ class TelegramChannel(BaseChannel):
                 session_id=f"telegram_{message.from_user.id}",
                 channel="telegram",
                 user_id=str(message.from_user.id),
-                text="Thanks, here is my phone number for cross-channel support.",
+                text=PHONE_LINK_TEXT,
                 language="en",
                 phone=phone,
             )
