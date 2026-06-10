@@ -7,14 +7,14 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph
 
-from app.agent.identity import resolve_user
+from app.agent.identity import normalize_phone, resolve_user
 from app.agent.sentiment import classify_sentiment
 from app.agent.tools import channel_ctx, create_ticket, get_ticket_status, session_ctx
 from app.core.config import settings
 from app.core.database import AsyncSessionFactory
 from app.core.logger import get_logger
 from app.core.redis import get_session, save_session
-from app.models import ChannelType, Message, MessageRole, Ticket, TicketStatus
+from app.models import ChannelType, Customer, Message, MessageRole, Ticket, TicketStatus
 from sqlalchemy import select
 from app.schemas import AgentResponse, IncomingMessage
 
@@ -109,13 +109,47 @@ def _is_escalation(text: str) -> bool:
     return any(kw.lower() in lower for kw in _ESCALATION_KEYWORDS)
 
 
+def _memory_key(session_id: str, phone: str | None) -> str:
+    """Redis key for the agent's conversational memory.
+
+    When the customer's phone is known, every channel shares one memory key
+    so the agent has real cross-channel context (Telegram, WhatsApp, web
+    chat, voice all see the same running conversation). Without a phone,
+    memory stays scoped to this channel's session.
+    """
+    if phone:
+        return f"phone_{normalize_phone(phone)}"
+    return session_id
+
+
 async def run_agent(msg: IncomingMessage) -> AgentResponse:
     """Run the LangGraph agent for one incoming message and return a structured response."""
     session_ctx.set(msg.session_id)
     channel_ctx.set(msg.channel)
+    channel_enum = ChannelType(msg.channel)
 
-    # Reconstruct message history from Redis
-    history = await get_session(msg.session_id)
+    # Resolve identity up front: even if this message itself carries no phone,
+    # a previously-linked Customer's phone lets us share live conversation
+    # memory across channels (see _memory_key). Reused below for persistence
+    # so the user is only resolved/created once per turn.
+    effective_phone = msg.phone
+    user_id: int | None = None
+    try:
+        async with AsyncSessionFactory() as db:
+            user = await resolve_user(db, msg.session_id, channel_enum, msg.phone, msg.language)
+            await db.commit()
+            user_id = user.id
+            if not effective_phone and user.customer_id:
+                customer = await db.get(Customer, user.customer_id)
+                if customer:
+                    effective_phone = customer.phone
+    except Exception as exc:
+        logger.error("Failed to resolve identity: %s", exc)
+
+    memory_key = _memory_key(msg.session_id, effective_phone)
+
+    # Reconstruct message history from Redis (shared cross-channel via phone)
+    history = await get_session(memory_key)
     past: list[BaseMessage] = []
     for h in history:
         if h["role"] == "user":
@@ -132,9 +166,9 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
     ticket_id = _extract_ticket_id(result["messages"])
     escalate = _is_escalation(msg.text) or _is_escalation(reply_text)
 
-    # Persist conversation turn to Redis
+    # Persist conversation turn to Redis (shared cross-channel via phone)
     await save_session(
-        msg.session_id,
+        memory_key,
         history + [
             {"role": "user", "text": msg.text},
             {"role": "agent", "text": reply_text},
@@ -148,12 +182,10 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
 
     # Persist both turns + update ticket escalation flag if needed
     try:
-        channel_enum = ChannelType(msg.channel)
         async with AsyncSessionFactory() as db:
-            user = await resolve_user(db, msg.session_id, channel_enum, msg.phone, msg.language)
             db.add(Message(
                 ticket_id=ticket_id,
-                user_id=user.id,
+                user_id=user_id,
                 session_id=msg.session_id,
                 channel=channel_enum,
                 role=MessageRole.user,
@@ -163,7 +195,7 @@ async def run_agent(msg: IncomingMessage) -> AgentResponse:
             ))
             db.add(Message(
                 ticket_id=ticket_id,
-                user_id=user.id,
+                user_id=user_id,
                 session_id=msg.session_id,
                 channel=channel_enum,
                 role=MessageRole.agent,

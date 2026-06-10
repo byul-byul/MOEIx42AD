@@ -53,7 +53,11 @@ export default function Chat() {
 
   async function loadHistory() {
     try {
-      const res = await fetch(`/api/session/${sessionId.current}`)
+      // Passing phone lets the backend prefer the customer's shared
+      // cross-channel memory (e.g. a Telegram conversation), so it shows up
+      // here too — see /api/session/{session_id}.
+      const params = phone ? `?phone=${encodeURIComponent(phone)}` : ''
+      const res = await fetch(`/api/session/${sessionId.current}${params}`)
       const history = await res.json()
       if (!history.length) return
       setMessages([WELCOME, ...history.map(m => ({ role: m.role, text: m.text, time: new Date() }))])

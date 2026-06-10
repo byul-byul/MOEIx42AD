@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.core import run_agent
+from app.agent.identity import normalize_phone
 from app.core.database import get_db
 from app.core.logger import get_logger
 from app.core.redis import get_session
@@ -22,13 +23,25 @@ async def handle_message(msg: IncomingMessage) -> AgentResponse:
 
 
 @router.get("/session/{session_id}")
-async def get_session_history(session_id: str, db: AsyncSession = Depends(get_db)) -> list[dict]:
+async def get_session_history(
+    session_id: str, phone: str | None = None, db: AsyncSession = Depends(get_db)
+) -> list[dict]:
     """Return stored message history for a session (used by web chat on page load).
 
-    Redis holds the live session (1h TTL). If it has expired — e.g. a customer
-    logged out and returns later with the same phone — fall back to Postgres
-    so the conversation can still be restored.
+    If `phone` is given, prefer the customer's shared cross-channel memory —
+    the same Redis key the agent uses for conversational context (see
+    agent/core.py::_memory_key). This is what makes "context already there"
+    work when a customer switches channels (e.g. Telegram -> web chat).
+
+    Falls back to this session's own history: Redis (1h TTL), then Postgres
+    for messages older than that — e.g. a customer logged out and returns
+    later with the same phone.
     """
+    if phone:
+        shared = await get_session(f"phone_{normalize_phone(phone)}")
+        if shared:
+            return shared
+
     history = await get_session(session_id)
     if history:
         return history

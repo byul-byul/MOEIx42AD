@@ -1,4 +1,6 @@
 # /backend/app/agent/identity.py
+import re
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -6,6 +8,16 @@ from app.core.logger import get_logger
 from app.models import ChannelType, Customer, User
 
 logger = get_logger(__name__)
+
+
+def normalize_phone(phone: str) -> str:
+    """Strip everything but digits, for use as a Redis/session key fragment.
+
+    Keeps phone-derived keys consistent regardless of "+", spaces, or
+    formatting differences between channels (e.g. Twilio's "whatsapp:+971..."
+    vs. a web chat phone-gate input).
+    """
+    return re.sub(r"\D", "", phone)
 
 
 async def resolve_user(
