@@ -19,7 +19,7 @@ fclean: clean
 
 ngrok:
 	@which ngrok > /dev/null || (echo "Error: ngrok not installed. Run: brew install ngrok" && exit 1)
-	@pkill -f "ngrok http" 2>/dev/null; true
+	@pkill -f "^ngrok http" 2>/dev/null; true
 	@(ngrok http 3000 > /tmp/ngrok-moei.log 2>&1 &)
 	@echo "Starting ngrok tunnel on port 3000..."
 	@for i in $$(seq 1 30); do \
@@ -42,7 +42,7 @@ print('ngrok tunnel ready:', url)"
 # pointing at the channels service on port 8001).
 cloudflare:
 	@which cloudflared > /dev/null || (echo "Error: cloudflared not installed. Run: brew install cloudflared" && exit 1)
-	@pkill -f "cloudflared tunnel" 2>/dev/null; true
+	@pkill -f "^cloudflared tunnel" 2>/dev/null; true
 	@rm -f /tmp/cloudflared-moei.log
 	@(cloudflared tunnel --url http://localhost:8001 > /tmp/cloudflared-moei.log 2>&1 &)
 	@echo "Starting Cloudflare tunnel on port 8001..."
